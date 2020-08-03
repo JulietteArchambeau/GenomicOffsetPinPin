@@ -21,6 +21,8 @@
 *.tex
 
 # Directories
+/figs/*
+/maps/*
 /doc/*
 
 # Reports
