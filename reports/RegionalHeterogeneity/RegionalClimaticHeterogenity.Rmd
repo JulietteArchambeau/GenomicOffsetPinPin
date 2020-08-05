@@ -1,0 +1,538 @@
+---
+title: "Regional climatic heterogeneity"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=FALSE)
+options(width = 300)
+library(knitr)
+library(raster)
+library(rgeos)
+library(tidyverse)
+library(dplyr)
+library(RColorBrewer)
+library(leaflet)
+library(htmltools)
+library(furrr)
+future::plan(multiprocess)
+library(ggplot2)
+library(GGally)
+library(viridis)
+library(hrbrthemes)
+```
+
+# Data pre-processing and fonctions
+
+The buffer zones used in this document have a radius of 5km, 10km, 20km, 50km, 75km and 100km. 
+
+```{r BufferSize}
+buffer.radius <- list(5000,10000,20000,50000,75000,100000) # in meters
+names(buffer.radius) <- c(str_sub(buffer.radius[1:5],1,-4),"100")
+```
+
+Functions used:
+
+
+```{r FuntionsUsed}
+# Extracting values in the buffer zones from the raster (tiff of each climtic variable)
+source("../../scripts/Functions/ExtractValuesFromBuffers.R")
+
+# Plotting the regional climatic heterogeneity by provenances (grouped by gene pools)
+source("../../scripts/Functions/PlotRegHeteroByprov.R")
+
+# Mapping with leaflet of the climatic variables and the buffer zones around each provenance
+source("../../scripts/Functions/MapClimRegHeteroInteractive.R")
+
+# Plotting the regional climatic heterogeneity by radius of the buffer zones
+source("../../scripts/Functions/PlotRegHeteroByradius.R")
+```
+
+Create a dataframe with the population structure and provenance coordinates:
+
+```{r DataframeCoordProvPopStructure, message =F}
+# Provenance coordinates
+data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+df <- unique(data[,c("prov","longitude_prov","latitude_prov")])
+df <- df[!(df$prov=="ROD"),]
+colnames(df) <- c("prov","longitude","latitude")
+
+# Adding proportion of belonging to each gene pool (population structure)
+gp <- data[!(is.na(data$Q1)),]
+gp <- gp[!(is.na(gp$height)),]
+gp <- droplevels(gp) %>%
+  group_by(prov) %>% 
+  summarise_at(vars(paste0(rep("Q",6),1:6)), mean)  # %>% mutate_at(2:7,funs(round(., 3))) 
+for (i in 1:length(gp$prov)){
+  gp[i,"mainGP"] <- names(gp[i,2:7])[which.max(apply(gp[i,2:7],MARGIN=2,max))]
+}
+colnames(gp) <- c("prov","gpNA","gpC","gpCS","gpFA","gpIA","gpSES","mainGP")
+
+df <- left_join(df,gp)
+df
+```
+
+Creating the buffer zones:
+
+```{r BufferAroundProvenances}
+xyprov <- SpatialPoints(df[,c("longitude","latitude")], proj4string=CRS("+proj=longlat +datum=WGS84"))
+buff5 <- buffer(xyprov,width=buffer.radius[[1]],dissolve=F) # 5km
+buff10 <- buffer(xyprov,width=buffer.radius[[2]],dissolve=F) # 10km
+buff20 <- buffer(xyprov,width=buffer.radius[[3]],dissolve=F) # 20km
+buff50 <- buffer(xyprov,width=buffer.radius[[4]],dissolve=F) # 50km
+buff75 <- buffer(xyprov,width=buffer.radius[[5]],dissolve=F) # 75km
+buff100 <- buffer(xyprov,width=buffer.radius[[6]],dissolve=F) # 100km
+```
+
+Labels of the plots:
+
+```{r LabelsProvPopStructure}
+labels <- sprintf("<strong> %s </strong><br/>Northern Africa: %s <br/>Corsica: %s <br/>Central Spain: %s <br/>French Atlantic: %s <br/>Iberian Atlantic: %s <br/>South-eastern Spain: %s",
+                  df$prov,round(df$gpNA,2), 
+                  round(df$gpC,2),
+                  round(df$gpCS,2),
+                  round(df$gpFA,2),
+                  round(df$gpIA,2),
+                  round(df$gpSES,2)) %>%
+  lapply(htmltools::HTML)
+labelsOnlyProv <- sprintf("<strong> %s </strong><br/>",
+                  df$prov) %>%
+  lapply(htmltools::HTML)
+```
+
+
+# Annual daily mean temperature (bio1)
+
+```{r Bio1Map,fig.height=8,fig.width=8}
+clim.var.name="Mean T° (bio1)"
+clim.var="bio1"
+reverse=TRUE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r Bio1Plots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+- The regional heterogeneity around the Corsican provenances is well captured when the radius is higher than 20km. 
+
+- The Central Spain has both provenances in regions with highly heterogenous temperatures and homogenous temperatures. 
+
+- Maybe the heterogenous temperatures of the South-eastern Spain is better captured when the radius is around 100km? 
+
+
+# Mean diurnal temperature range (bio2)
+
+```{r Bio2Map,fig.height=8,fig.width=8}
+clim.var.name="Diurnal T° range (bio2)"
+clim.var="bio2"
+reverse=TRUE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r Bio2Plots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Max temperature of the warmest month (bio5)
+
+```{r Bio5Map,fig.height=8,fig.width=8}
+clim.var.name="Max T° (bio5)"
+clim.var="bio5"
+reverse=TRUE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r Bio5Plots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Min temperature of the coldest month (bio6)
+
+```{r Bio6Map,fig.height=8,fig.width=8}
+clim.var.name="Min T° (bio6)"
+clim.var="bio6"
+reverse=TRUE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r Bio6Plots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Annual precipitation (bio12)
+
+```{r Bio12Map,fig.height=8,fig.width=8}
+clim.var.name="Annual precipitation (bio12)"
+clim.var="bio12"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r Bio12Plots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Precipitation of the wettest month (bio13)
+
+```{r Bio13Map,fig.height=8,fig.width=8}
+clim.var.name="Max T° (bio13)"
+clim.var="bio13"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r Bio13Plots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Precipitation of the driest month (bio14)
+
+```{r Bio14Map,fig.height=8,fig.width=8}
+clim.var.name="Max T° (bio14)"
+clim.var="bio14"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r Bio14Plots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+
+
+
+# Mean P-PET (ppet.mean)
+
+> Precipitation (P) minus potential evapotranspiration (PET)
+
+```{r MeanPPETMap,fig.height=8,fig.width=8}
+clim.var.name="Mean P-PET (ppet.mean)"
+clim.var="ppet.mean"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r MeanPPETPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+
+# Min P-PET (ppet.min)
+
+> Precipitation (P) minus potential evapotranspiration (PET)
+
+```{r MinPPETMap,fig.height=8,fig.width=8}
+clim.var.name="Min P-PET (ppet.min)"
+clim.var="ppet.min"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r MinPPETPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+
+# Max P-PET (ppet.max)
+
+> Precipitation (P) minus potential evapotranspiration (PET)
+
+```{r MaxPPETMap,fig.height=8,fig.width=8}
+clim.var.name="Max P-PET (ppet.max)"
+clim.var="ppet.max"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r MaxPPETPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+
+
+
+# Mean PET (pet.mean)
+
+> Potential evapotranspiration (PET)
+
+```{r MeanPETMap,fig.height=8,fig.width=8}
+clim.var.name="Mean PET (pet.mean)"
+clim.var="pet.mean"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r MeanPETPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+
+# Min PET (pet.min)
+
+> Potential evapotranspiration (PET)
+
+```{r MinPETMap,fig.height=8,fig.width=8}
+clim.var.name="Min PET (pet.min)"
+clim.var="pet.min"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r MinPETPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+
+# Max PET (pet.max)
+
+> Potential evapotranspiration (PET)
+
+```{r MaxPETMap,fig.height=8,fig.width=8}
+clim.var.name="Max PET (pet.max)"
+clim.var="pet.max"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster,reverse)
+```
+
+```{r MaxPETPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Winter precipitation (prec.djf)
+
+
+```{r PrecdjfMap,fig.height=8,fig.width=8}
+clim.var.name="Winter precipitation (prec.djf)"
+clim.var="prec.djf"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster=clim.var.raster,reverse)
+```
+
+```{r PrecdjfPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Spring precipitation (prec.mam)
+
+
+```{r PrecmamMap,fig.height=8,fig.width=8}
+clim.var.name="Spring precipitation (prec.mam)"
+clim.var="prec.mam"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster=clim.var.raster,reverse)
+```
+
+```{r PrecmamPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Summer precipitation (prec.jja)
+
+```{r PrecjjaMap,fig.height=8,fig.width=8}
+clim.var.name="Summer precipitation (prec.jja)"
+clim.var="prec.jja"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster=clim.var.raster,reverse)
+```
+
+```{r PrecjjaPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Autumn precipitation (prec.son)
+
+
+```{r PrecsonMap,fig.height=8,fig.width=8}
+clim.var.name="Autumn precipitation (prec.son)"
+clim.var="prec.son"
+reverse=FALSE
+
+clim.var.raster.new <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster=clim.var.raster.new,reverse)
+```
+
+```{r PrecsonPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+
+# Winter daily mean temperature (tmean.djf)
+
+
+```{r TmeandjfMap,fig.height=8,fig.width=8}
+clim.var.name="Winter T° (tmean.djf)"
+clim.var="tmean.djf"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster=clim.var.raster,reverse)
+```
+
+```{r TmeandjfPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Spring daily mean temperature (tmean.mam)
+
+
+```{r TmeanmamMap,fig.height=8,fig.width=8}
+clim.var.name="Spring precipitation (tmean.mam)"
+clim.var="tmean.mam"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster=clim.var.raster,reverse)
+```
+
+```{r TmeanmamPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Summer daily mean temperature (tmean.jja)
+
+```{r TmeanjjaMap,fig.height=8,fig.width=8}
+clim.var.name="Summer precipitation (tmean.jja)"
+clim.var="tmean.jja"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster=clim.var.raster,reverse)
+```
+
+```{r TmeanjjaPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Autumn daily mean temperature (tmean.son)
+
+
+```{r TmeansonMap,fig.height=8,fig.width=8}
+clim.var.name="Autumn precipitation (tmean.son)"
+clim.var="tmean.son"
+reverse=FALSE
+
+clim.var.raster <- raster(paste0("../../data/climate/Tiff_1901_2009/map_",clim.var,"_1901-2009_with_34_sampling_points.tif"))
+MapClimRegHeteroInteractive(clim.var.name,clim.var,clim.var.raster=clim.var.raster,reverse)
+```
+
+```{r TmeansonPlots,fig.height=7,fig.width=14}
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+
+
+
