@@ -1,0 +1,198 @@
+---
+title: "Regional topographic heterogeneity"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=FALSE)
+options(width = 300)
+library(knitr)
+library(raster)
+library(rgeos)
+library(tidyverse)
+library(dplyr)
+library(RColorBrewer)
+library(leaflet)
+library(htmltools)
+library(furrr)
+future::plan(multiprocess)
+library(ggplot2)
+library(GGally)
+library(viridis)
+library(hrbrthemes)
+```
+
+# Data pre-processing and fonctions
+
+The buffer zones used in this document have a radius of 5km, 10km, 20km, 50km, 75km and 100km. 
+
+```{r BufferSize}
+buffer.radius <- list(5000,10000,20000,50000,75000,100000) # in meters
+names(buffer.radius) <- c(str_sub(buffer.radius[1:5],1,-4),"100")
+```
+
+Functions used:
+
+```{r FunctionsUsed}
+# Extracting values in the buffer zones from the raster (tiff of each climtic variable)
+source("../../scripts/Functions/ExtractValuesFromBuffers.R")
+
+# Plotting the regional climatic heterogeneity by provenances (grouped by gene pools)
+source("../../scripts/Functions/PlotRegHeteroByprov.R")
+
+# Plotting the regional climatic heterogeneity by radius of the buffer zones
+source("../../scripts/Functions/PlotRegHeteroByradius.R")
+```
+
+Create a dataframe with the population structure and provenance coordinates:
+
+```{r DataframeCoordProvPopStructure, message =F}
+# Provenance coordinates
+data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+df <- unique(data[,c("prov","longitude_prov","latitude_prov")])
+df <- df[!(df$prov=="ROD"),]
+colnames(df) <- c("prov","longitude","latitude")
+
+# Adding proportion of belonging to each gene pool (population structure)
+gp <- data[!(is.na(data$Q1)),]
+gp <- gp[!(is.na(gp$height)),]
+gp <- droplevels(gp) %>%
+  group_by(prov) %>% 
+  summarise_at(vars(paste0(rep("Q",6),1:6)), mean)  # %>% mutate_at(2:7,funs(round(., 3))) 
+for (i in 1:length(gp$prov)){
+  gp[i,"mainGP"] <- names(gp[i,2:7])[which.max(apply(gp[i,2:7],MARGIN=2,max))]
+}
+colnames(gp) <- c("prov","gpNA","gpC","gpCS","gpFA","gpIA","gpSES","mainGP")
+
+df <- left_join(df,gp)
+df
+```
+
+Creating the buffer zones:
+
+```{r BufferAroundProvenances,eval=F,echo=F}
+xyprov <- SpatialPoints(df[,c("longitude","latitude")], proj4string=CRS("+proj=longlat +datum=WGS84"))
+buff5 <- buffer(xyprov,width=buffer.radius[[1]],dissolve=F) # 5km
+buff10 <- buffer(xyprov,width=buffer.radius[[2]],dissolve=F) # 10km
+buff20 <- buffer(xyprov,width=buffer.radius[[3]],dissolve=F) # 20km
+buff50 <- buffer(xyprov,width=buffer.radius[[4]],dissolve=F) # 50km
+buff75 <- buffer(xyprov,width=buffer.radius[[5]],dissolve=F) # 75km
+buff100 <- buffer(xyprov,width=buffer.radius[[6]],dissolve=F) # 100km
+```
+
+
+# Elevation (DEM)
+
+```{r Elevation,fig.height=7,fig.width=14}
+clim.var.name="Elevation"
+clim.var.raster <- raster("../../data/Topography/SrtmWGS84/MosaicTif/srtm_mosaic.tif")
+
+# df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+# saveRDS(df2,file="../../data/DfPrePlots/dfSRTM.rds")
+df2 <- readRDS(file="../../data/DfPrePlots/dfSRTM.rds")
+
+
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Topographic wetness index TWI
+
+NA for the provenance COM when te buffer zones is 5km or 10km. 
+
+
+```{r TWI,fig.height=7,fig.width=14}
+clim.var.name="TWI"
+clim.var.raster <- raster("../../data/Topography/TWI/TWI_UTM31N.tif")
+
+df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+saveRDS(df2,file="../../data/DfPrePlots/dfTWI.rds")
+df2 <- readRDS(file="../../data/DfPrePlots/dfTWI.rds")
+
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+
+# Curvature
+
+<!-- What is curvature? https://www.esri.com/arcgis-blog/products/product/imagery/understanding-curvature-rasters/?rmedium=redirect&rsource=blogs.esri.com/esri/arcgis/2010/10/27/understanding-curvature-rasters -->
+
+```{r Curvature,fig.height=7,fig.width=14}
+clim.var.name="Curvature"
+clim.var.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsUTM31N/curvature_mosaic_UTM31N.tif")
+
+# df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+# saveRDS(df2,file="../../data/DfPrePlots/dfCurvature.rds")
+df2 <- readRDS(file="../../data/DfPrePlots/dfCurvature.rds")
+
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Slope
+
+```{r Slope,fig.height=7,fig.width=14}
+clim.var.name="Slope"
+clim.var.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsUTM31N/slope_mosaic_UTM31N.tif")
+
+# df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+# saveRDS(df2,file="../../data/DfPrePlots/dfSlope.rds")
+df2 <- readRDS(file="../../data/DfPrePlots/dfSlope.rds")
+
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
+
+# Aspect
+
+```{r Aspect,fig.height=7,fig.width=14}
+clim.var.name="Aspect"
+clim.var.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsUTM31N/aspect_mosaic_UTM31N.tif")
+
+# df2 <- bind_cols(df,future_map_dfr(buffer.radius,ExtractValuesFromBuffers))
+# saveRDS(df2,file="../../data/DfPrePlots/dfAspect.rds")
+df2 <- readRDS(file="../../data/DfPrePlots/dfAspect.rds")
+
+PlotRegHeteroByprov(data=df2)
+PlotRegHeteroByradius(data=df2)
+```
