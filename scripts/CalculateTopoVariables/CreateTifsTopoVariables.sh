@@ -22,6 +22,8 @@ cd /home/juliette/Documents/GenomicOffset/GenomicOffsetPinPin/data/Topography/  
 # Resolution: 90m.
 
 
+
+
 ####### 2/ Convert TIF in SGRD
 ####### --------------------------
 
@@ -69,6 +71,10 @@ saga_cmd grid_tools 3 -GRIDS SrtmWGS84/SGRD/srtm_35_04.sgrd\;SrtmWGS84/SGRD/srtm
 
 
 
+# save the file in tif for further analyses:
+gdal_translate -of GTiff SrtmWGS84/SGRD/srtm_mosaic.sdat SrtmWGS84/MosaicTif/srtm_mosaic.tif
+
+
 
 
 ####### 4/ Reprojecting from WGS 84 to UTM 31N
@@ -89,6 +95,8 @@ saga_cmd pj_proj4 4 -SOURCE SrtmWGS84/SGRD/srtm_mosaic.sgrd \
 
 
 
+
+
 ####### 5/ Calculating the slope, aspect and curvature
 ####### ----------------------------------------------
 
@@ -97,18 +105,21 @@ saga_cmd ta_morphometry 0 -ELEVATION SrtmUTM/srtm_mosaic_UTM31N.sgrd \
 						  -ASPECT SlopeAspectCurvature/gridsUTM31N/aspect_mosaic_UTM31N.sgrd \
 						  -C_GENE SlopeAspectCurvature/gridsUTM31N/curvature_mosaic_UTM31N.sgrd
 
-						
-					  
-					  
-####### 8/ Convert grids to tifs
-####### ------------------------
-
-# from .sgrd to .tif
-
+# save the file in tif for further analyses:			
 gdal_translate -of GTiff SlopeAspectCurvature/gridsUTM31N/slope_mosaic_UTM31N.sdat SlopeAspectCurvature/TifsUTM31N/slope_mosaic_UTM31N.tif
 gdal_translate -of GTiff SlopeAspectCurvature/gridsUTM31N/aspect_mosaic_UTM31N.sdat SlopeAspectCurvature/TifsUTM31N/aspect_mosaic_UTM31N.tif
 gdal_translate -of GTiff SlopeAspectCurvature/gridsUTM31N/curvature_mosaic_UTM31N.sdat SlopeAspectCurvature/TifsUTM31N/curvature_mosaic_UTM31N.tif
 
+
+			  
+	
+####### 6/ Calculating the topographic wetness index
+####### --------------------------------------------
+
+
+saga_cmd ta_preprocessor 5 -ELEV SrtmUTM/srtm_mosaic_UTM31N.sgrd -FILLED TWI/demfilledsinks_UTM31N.sgrd # bassins-versants
+saga_cmd ta_hydrology 15 -DEM TWI/demfilledsinks_UTM31N.sgrd -TWI TWI/TWI_UTM31N.srgd # TWI
+gdal_translate -of GTiff TWI/TWI_UTM31N.sdat TWI/TWI_UTM31N.tif # SAGA format -> GEOTif tif
 
 
 
