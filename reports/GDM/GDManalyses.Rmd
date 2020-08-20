@@ -1,0 +1,1126 @@
+---
+title: "GDM"
+author: "Juliette Archambeau"
+date: "17 juillet 2020"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+---
+
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=TRUE)
+options(width = 300)
+library(knitr)
+library(hierfstat)
+library(reshape2)
+library(ggbiplot)
+library(gdm)
+#library(cowplot)
+#library(ggplot2)
+#library(ggpubr)
+#library(stringi)
+library(beepr)
+library(dplyr)
+#library(devtools)
+#library(xtable)
+library(tidyverse)
+#library(tibble)
+library(raster)
+library(sgdm)
+```
+
+Mayeb some interesting information here: 
+
+  - https://thierrygosselin.github.io/assigner/articles/web_only/fst_comparisons.html
+  - some useful code here: https://github.com/cran/gdm/blob/master/R/GDM_Table_Funcs.R
+  - not sure it will be useful X) https://popgen.nescent.org/DifferentiationSNP.html
+  - hierfstats package use https://www.sciencedirect.com/science/article/pii/S1567134807001037?via%3Dihub
+  - help page gdm https://cran.r-project.org/web/packages/gdm/gdm.pdf#Rfn.formatsitepair
+  
+  
+
+<!-- Functions & Options used -->
+
+```{r FuntionsOptionsUsed,echo=F}
+source("../../scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+# Gray scale
+grayscale_colors <- gray.colors(100,            # number of different color levels
+                                start = 0.0,    # how black (0) to go
+                                end = 1.0,      # how white (1) to go
+                                gamma = 2.2,    # correction between how a digital
+                                # camera sees the world and how human eyes see it
+                                alpha = NULL)
+```
+
+
+# Calculating the Fst matrix
+
+To calculate the Fst matrix, we use Weir and Cockerham method. 
+
+
+```{r  LoadFilesAndFormat}
+# File with the genotype names (clone names)
+geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
+
+# File with the genotype of each clone for each SNP
+geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
+str(geno[,1:20])
+dim(geno) # SNPs in rows, genotypes in columns
+
+# In this file, SNPs have their names, but not the genotypes.
+head(geno[,1:10])
+
+# Removing the first two columns with allele info (A,T, G or C)
+geno <- geno[,3:dim(geno)[[2]]]
+
+# Give the genotype name for each column of geno
+colnames(geno) <- rownames(geno_names)
+
+rm(geno_names)
+
+head(geno[,1:10])
+dim(geno)
+```
+
+<!-- I followed the example in the package 'hierfstats' to format the dataset. Here is the exemple of the package hierfstats: -->
+
+```{r HierfstatsExample, eval=F,echo=F}
+data(gtrunchier)
+head(gtrunchier)
+pairwise.WCfst(gtrunchier[,-2],diploid=TRUE)
+```
+
+```{r  PrepareData}
+geno[geno ==1] <- 12
+geno[geno ==2] <- 22
+geno[geno ==0] <- 11
+geno <- t(geno) # SNps in column and genotypes in row
+geno <- as.data.frame(geno)
+geno$prov <- substr(row.names(geno), 0, 3)
+geno <- geno %>% select(prov, everything())
+geno[1:10,1:10]
+```
+
+
+```{r ComputeFstMatrix}
+# fst <- pairwise.WCfst(geno,diploid=TRUE)
+# saveRDS(fst,file="../../outputs/GDM/FstMatrices/FstMatrix5165SnpsRaw.rds")
+fst <- readRDS(file="../../outputs/GDM/FstMatrices/FstMatrix5165SnpsRaw.rds")
+```
+
+4 Fst values have very very small negative values. We set them to 0.
+
+```{r NegValuestoZeroFstMatrix}
+fst[which(fst <0)]
+fst[which(fst <0)] <- 0
+round(fst,2)
+# saveRDS(fst,file="../../outputs/GDM/FstMatrices/FstMatrix5165Snps34Provs.rds")
+```
+
+
+
+
+# Load data
+
+We run the GDM directly with the Fst matrix, but we can't use rasters with fst matrix in 'formatsitepair' function.
+
+bioData = site-by-site distance (dissimilarity) matrix; bioFormat = 3: is used when a site-by-site distance (dissimilarity) matrix has already been created for the biological response (e.g., Fst for genetic data). The distance matrix must have as the first column the names of the sites (therefore the matrix will not be square). The column of site names should have the same name as the siteColumn argument. Only the lower half (triangle) of the matrix is needed to create the site-pair output table, but this function automatically removes the upper half if present. This is the only bioFormat in which the environmental data CANNOT be provided as a raster object.
+
+
+## Fst matrix
+
+```{r LoadFstMatrix}
+fst <- readRDS(file="../../outputs/GDM/FstMatrices/FstMatrix5165Snps34Provs.rds")
+fst <- as.data.frame(fst) 
+fst <- fst %>%  tibble::rownames_to_column("prov") # The distance matrix must have as the first column the names of the provenances
+```
+
+## Climatic and soil values for each provenance
+
+This corresponds to the mean climatic values between 1901 and 2009 (that I have already calculated in the previous paper).
+
+```{r LoadEnvData}
+data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+data <- data %>% select(contains("prov"))
+data <- unique(data)
+data <- data[!(data$prov=="ROD"),]
+data
+```
+
+```{r VizualizeEnvData,fig.height=13,fig.width=13}
+cor <- data %>%  select(contains("_prov"),-contains("sub")) %>% cor()
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=23, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.01, insig = "blank", number.cex =0.8,tl.cex = 0.8,
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- data %>%  select(contains("_prov"),-contains("sub")) %>%  prcomp(center = TRUE,scale. = TRUE)
+ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+Comment:
+
+- `pet.max_prov` and `bio2_prov` are highly positively correlated with the altitude, and `bio6_prov` and `ppet.min_prov` are highly negatively correlated with the altitude. 
+
+- Importantly, the altitude is highly correlated (0.86) to latitude...
+
+
+
+### Set 1 
+
+First set of climatic, soil and altitude variables
+
+```{r SelectEnvDataSet1,fig.height=5,fig.width=5}
+# Select env variables
+select.var <- c(paste0("bio",c(1,5,12,14),"_prov"),"sand_top_prov","depth_roots_prov","altitude_prov")
+cor <- cor(data[,select.var])
+
+# matrix of the p-value of the correlation
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=45, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.01, insig = "blank", 
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- prcomp(data[,grep("_prov",select.var,value = T)], center = TRUE,scale. = TRUE)
+ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+### Set 2
+
+Second set of climatic, soil and altitude variables
+
+```{r SelectEnvDataSet2,fig.height=5,fig.width=5}
+select.var2 <- c("bio12_prov","bio1_prov","ppet.min_prov","bio6_prov","sand_top_prov","depth_roots_prov","altitude_prov")
+cor <- cor(data[,select.var2])
+
+# matrix of the p-value of the correlation
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=45, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.01, insig = "blank", 
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- prcomp(data[,select.var2], center = TRUE,scale. = TRUE)
+
+ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+
+### Set 3
+
+Third set of climatic, soil and altitude variables
+
+```{r SelectEnvDataSet3,fig.height=5,fig.width=5}
+select.var3 <- c("bio14_prov","bio1_prov","ppet.mean_prov","sand_top_prov","depth_roots_prov","altitude_prov")
+cor <- cor(data[,select.var3])
+
+# matrix of the p-value of the correlation
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=45, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.01, insig = "blank", 
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- prcomp(data[,select.var3], center = TRUE,scale. = TRUE)
+
+ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+
+
+### Set 4
+
+Fourth set of climatic, soil and altitude variables. Same of set 3, but without altitude.
+
+```{r SelectEnvDataSet4,fig.height=5,fig.width=5}
+select.var4 <- c("bio14_prov","bio1_prov","ppet.mean_prov","sand_top_prov","depth_roots_prov","ppet.min_prov")
+cor <- cor(data[,select.var4])
+
+# matrix of the p-value of the correlation
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=45, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.01, insig = "blank", 
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- prcomp(data[,select.var4], center = TRUE,scale. = TRUE)
+
+ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+## Climatic, altitude and soil rasters
+
+```{r LoadRastersAndShapefile,cache=T}
+# Maritime pine distribution from EUFORGEN (shapefile)
+shp  <- shapefile('../../../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/Pinus_pinaster_EUFORGEN.shp')
+
+# Climatic rasters
+grids <- list.files("../../data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
+grids <- grids[grepl("bio5_|bio14_|bio12_|bio1_",grids)==T]
+grids <- c(grids[[1]],grids[[4]],grids[[2]],grids[[3]])
+rast <- raster::stack(paste0("../../data/climate/Tiff_1901_2009/", grids))
+names(rast) <- c("bio1","bio5","bio12","bio14")
+rast <- mask(rast,shp, updatevalue=NA)
+
+
+# SRTM altitude raster
+rast.alt <- raster("../../data/Topography/SrtmWGS84/MosaicTif/srtm_mosaic.tif")
+rast.alt <- crop(rast.alt,extent(rast)) # attribute the extent of climatic raster to altitude rasters
+rast.alt <- raster::resample(rast.alt,rast) # same number of cells between the altitude and climatic rasters
+rast.alt <- mask(rast.alt,shp,updatevalue=NA) # keep only cells within maritime pine distribution 
+
+# Soil rasters
+stack.soil <- stack("../../data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif","../../data/soil/STU_EU_T_SAND_WGS84.tif")
+names(stack.soil) <- c("depth_roots","sand_top")
+stack.soil <- crop(stack.soil,extent(rast)) # attribute the extent of climatic raster to soil raster
+stack.soil <- raster::resample(stack.soil,rast) # same number of cells between the soil and climatic rasters
+stack.soil <- mask(stack.soil,shp,updatevalue=NA) # keep only cells within maritime pine distribution 
+```
+
+
+## Hillshade (backgrouond)
+
+```{r MapBackground}
+# fond de carte
+# https://land.copernicus.eu/imagery-in-situ/eu-dem/eu-dem-v1-0-and-derived-products/slope?tab=download
+# Need to create an account
+
+# I took the hillsahede map from here:
+# https://www.eea.europa.eu/data-and-maps/data/digital-elevation-model-of-europe
+
+background <- raster("../../data/maps/EuropeanData/hillshade1x1.tif")
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+background <- projectRaster(background, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+background
+e <- extent(-10, 14, 31, 46)
+background <- crop(background, e)
+
+# text(9,32,"Potentiels refuges climatiques\ndes pois chiches\n lors du réchauffement climatique")
+```
+
+
+# GDM analysis
+
+Options to discuss with Santi:
+
+- Do we include the **geographic distance between provenances** as a model term? geo=T
+
+- Do we include **altitude** as a model term?
+
+
+> Comment 
+
+When trying to run GDM without altitude as parameter but with geo=T, it doesn't work. Warning message: "The algorithm was unable to fit a model to your data. The sum of the spline coefficients = 0 and deviance explained = NULL. Returning NULL object.".
+
+## Set 1
+
+### Accounting for geographic distance (with altitude)
+
+```{r FormatDataGeoDistAlt}
+subdata <- data[,c("prov","latitude_prov","longitude_prov","altitude_prov",select.var)]
+colnames(subdata) <- c("prov","longitude","latitude","altitude",paste0(str_sub(select.var,0,-6)))
+
+gdmTab_alt <- formatsitepair(fst, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab_alt)
+```
+
+```{r RunningGDMGeoDistAlt,fig.height=7,fig.width=7}
+gdm.1 <- gdm(gdmTab_alt, geo=T)
+
+# Deviance explained
+gdm.1$explained
+
+
+# Leave-one out cross validation
+sgdm::gdm.cv(gdmTab_alt,nfolds = 34,performance = "r2",geo=T) # R2
+sgdm::gdm.cv(gdmTab_alt,nfolds = 34,performance = "rmse",geo=T) # RMSE
+
+# Cross validation with 17 folds
+sgdm::gdm.cv(gdmTab_alt,nfolds = 17,performance = "r2",geo=T)
+
+# Cross validation with 2 folds
+sgdm::gdm.cv(gdmTab_alt,nfolds = 2,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+# plot(gdm.1) # automatically return all graphs (but with default legends)
+gdm.1.splineDat <- isplineExtract(gdm.1)
+# str(gdm.1.splineDat)
+plot(gdm.1.splineDat$x[,"Geographic"], gdm.1.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial ecological distance") # or ylab= f(Geographic distance)
+gdm.1.pred <- predict.gdm(gdm.1, gdmTab_alt)
+# head(gdm.1.pred)
+
+
+plot(gdmTab_alt$distance, gdm.1.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+
+plot(gdm.1.splineDat[[1]][,"bio1"], gdm.1.splineDat[[2]][,"bio1"], type="l",lwd=3, xlab="Mean T° (°C)", ylab="Partial Ecological Distance")
+plot(gdm.1.splineDat[[1]][,"bio5"], gdm.1.splineDat[[2]][,"bio5"], type="l",lwd=3, xlab="Max T° of the warmest month (°C)", ylab="Partial Ecological Distance")
+plot(gdm.1.splineDat[[1]][,"bio12"], gdm.1.splineDat[[2]][,"bio12"], type="l",lwd=3, xlab="Annual precipitation (mm)", ylab="Partial Ecological Distance")
+plot(gdm.1.splineDat[[1]][,"bio14"], gdm.1.splineDat[[2]][,"bio14"], type="l",lwd=3, xlab="Precipitation of the driest month (mm)", ylab="Partial Ecological Distance")
+plot(gdm.1.splineDat[[1]][,"sand_top"], gdm.1.splineDat[[2]][,"sand_top"], type="l",lwd=3, xlab="Sand top (%)", ylab="Partial Ecological Distance")
+plot(gdm.1.splineDat[[1]][,"depth_roots"], gdm.1.splineDat[[2]][,"depth_roots"], type="l",lwd=3, xlab="Depth roots", ylab="Partial Ecological Distance")
+plot(gdm.1.splineDat[[1]][,"altitude"], gdm.1.splineDat[[2]][,"altitude"], type="l",lwd=3, xlab="Altitude", ylab="Partial Ecological Distance")
+```
+
+
+Only a small effect of the precipitation of the driest month. The other climatic variables have no effect. Stronger effect of the altitude and the geographic distance.
+
+
+```{r VizualizeGDM1, fig.height=7,fig.width=10}
+stackall <- stack(rast.alt,stack.soil,rast) # assemble climatic and soil rasters
+
+rastTrans <- gdm.transform(gdm.1, stackall)
+
+rastDat <- na.omit(getValues(rastTrans))
+pcaSamp <- prcomp(rastDat)
+pcaRast <- predict(rastTrans, pcaSamp, index=1:3)
+
+pcaRast[[1]] <- (pcaRast[[1]]-pcaRast[[1]]@data@min) /
+(pcaRast[[1]]@data@max-pcaRast[[1]]@data@min)*255
+pcaRast[[2]] <- (pcaRast[[2]]-pcaRast[[2]]@data@min) /
+(pcaRast[[2]]@data@max-pcaRast[[2]]@data@min)*255
+pcaRast[[3]] <- (pcaRast[[3]]-pcaRast[[3]]@data@min) /
+(pcaRast[[3]]@data@max-pcaRast[[3]]@data@min)*255
+
+plotRGB(pcaRast, r=1, g=2, b=3)
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(pcaRast,add=T,bgalpha=0)
+```
+
+### No accounting for geographic distance (with altitude)
+
+
+```{r RunningGDMAlt,fig.height=7,fig.width=7}
+gdm.2 <- gdm(gdmTab_alt, geo=F)
+
+# Deviance explained
+gdm.2$explained
+
+
+# Leave-one out cross validation
+sgdm::gdm.cv(gdmTab_alt,nfolds = 34,performance = "r2",geo=F) # R2
+sgdm::gdm.cv(gdmTab_alt,nfolds = 34,performance = "rmse",geo=F) # RMSE
+
+# Cross validation with 17 folds
+sgdm::gdm.cv(gdmTab_alt,nfolds = 17,performance = "r2",geo=F)
+
+# Cross validation with 2 folds
+sgdm::gdm.cv(gdmTab_alt,nfolds = 2,performance = "r2",geo=F)
+
+
+par(mfrow=c(2,2))
+# plot(gdm.1) # automatically return all graphs (but with default legends)
+gdm.2.splineDat <- isplineExtract(gdm.2)
+
+gdm.2.pred <- predict(gdm.2, gdmTab_alt)
+plot(gdmTab_alt$distance, gdm.2.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+
+plot(gdm.2.splineDat[[1]][,"bio1"], gdm.2.splineDat[[2]][,"bio1"], type="l",lwd=3, xlab="Mean T° (°C)", ylab="Partial Ecological Distance")
+plot(gdm.2.splineDat[[1]][,"bio5"], gdm.2.splineDat[[2]][,"bio5"], type="l",lwd=3, xlab="Max T° of the warmest month (°C)", ylab="Partial Ecological Distance")
+plot(gdm.2.splineDat[[1]][,"bio12"], gdm.2.splineDat[[2]][,"bio12"], type="l",lwd=3, xlab="Annual precipitation (mm)", ylab="Partial Ecological Distance")
+plot(gdm.2.splineDat[[1]][,"bio14"], gdm.2.splineDat[[2]][,"bio14"], type="l",lwd=3, xlab="Precipitation of the driest month (mm)", ylab="Partial Ecological Distance")
+plot(gdm.2.splineDat[[1]][,"sand_top"], gdm.2.splineDat[[2]][,"sand_top"], type="l",lwd=3, xlab="Sand top (%)", ylab="Partial Ecological Distance")
+plot(gdm.2.splineDat[[1]][,"depth_roots"], gdm.2.splineDat[[2]][,"depth_roots"], type="l",lwd=3, xlab="Depth roots", ylab="Partial Ecological Distance")
+plot(gdm.2.splineDat[[1]][,"altitude"], gdm.2.splineDat[[2]][,"altitude"], type="l",lwd=3, xlab="Altitude", ylab="Partial Ecological Distance")
+```
+
+
+```{r VizualizeGDM2,fig.height=7,fig.width=10}
+stackall <- stack(rast.alt,stack.soil,rast) # assemble climatic and soil rasters
+
+rastTrans <- gdm.transform(gdm.2, stackall)
+
+rastDat <- na.omit(getValues(rastTrans))
+pcaSamp <- prcomp(rastDat)
+pcaRast <- predict(rastTrans, pcaSamp, index=1:3)
+
+pcaRast[[1]] <- (pcaRast[[1]]-pcaRast[[1]]@data@min) /
+(pcaRast[[1]]@data@max-pcaRast[[1]]@data@min)*255
+pcaRast[[2]] <- (pcaRast[[2]]-pcaRast[[2]]@data@min) /
+(pcaRast[[2]]@data@max-pcaRast[[2]]@data@min)*255
+pcaRast[[3]] <- (pcaRast[[3]]-pcaRast[[3]]@data@min) /
+(pcaRast[[3]]@data@max-pcaRast[[3]]@data@min)*255
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(pcaRast,add=T,bgalpha=0)
+```
+
+
+### Accounting for geographic distance (without altitude)
+
+```{r FormatDataGeoDist}
+subdata <- data[,c("prov","latitude_prov","longitude_prov",select.var)]
+colnames(subdata) <- c("prov","longitude","latitude",paste0(str_sub(select.var,0,-6)))
+
+gdmTab_noalt <- formatsitepair(fst, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab_noalt)
+```
+
+```{r RunningGDMGeoDist,fig.height=7,fig.width=7}
+gdm.3 <- gdm(gdmTab_noalt, geo=T)
+
+# Deviance explained
+gdm.3$explained
+
+
+# Leave-one out cross validation
+# sgdm::gdm.cv(gdmTab_noalt,nfolds = 34,performance = "r2",geo=T) # R2 # 
+# Error message:  Returning NULL object.Error in UseMethod("predict") : 
+  # pas de méthode pour 'predict' applicable pour un objet de classe "NULL"
+# sgdm::gdm.cv(gdmTab_noalt,nfolds = 34,performance = "rmse",geo=T) # RMSE
+
+# Cross validation with 17 folds
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 17,performance = "r2",geo=T)
+
+# Cross validation with 2 folds
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 2,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+gdm.3.splineDat <- isplineExtract(gdm.3)
+
+plot(gdm.3.splineDat$x[,"Geographic"], gdm.3.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial ecological distance") # or ylab= f(Geographic distance)
+
+gdm.3.pred <- predict.gdm(gdm.3, gdmTab_noalt) # HERE
+plot(gdmTab_noalt$distance, gdm.3.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.3.splineDat[[1]][,"bio1"], gdm.3.splineDat[[2]][,"bio1"], type="l",lwd=3, xlab="Mean T° (°C)", ylab="Partial Ecological Distance")
+plot(gdm.3.splineDat[[1]][,"bio5"], gdm.3.splineDat[[2]][,"bio5"], type="l",lwd=3, xlab="Max T° of the warmest month (°C)", ylab="Partial Ecological Distance")
+plot(gdm.3.splineDat[[1]][,"bio12"], gdm.3.splineDat[[2]][,"bio12"], type="l",lwd=3, xlab="Annual precipitation (mm)", ylab="Partial Ecological Distance")
+plot(gdm.3.splineDat[[1]][,"bio14"], gdm.3.splineDat[[2]][,"bio14"], type="l",lwd=3, xlab="Precipitation of the driest month (mm)", ylab="Partial Ecological Distance")
+plot(gdm.3.splineDat[[1]][,"sand_top"], gdm.3.splineDat[[2]][,"sand_top"], type="l",lwd=3, xlab="Sand top (%)", ylab="Partial Ecological Distance")
+plot(gdm.3.splineDat[[1]][,"depth_roots"], gdm.3.splineDat[[2]][,"depth_roots"], type="l",lwd=3, xlab="Depth roots", ylab="Partial Ecological Distance")
+```
+
+
+Only a small effect of the precipitation of the driest month. The other climatic variables have no effect. Stronger effect of the altitude and the geographic distance.
+
+
+```{r VizualizeGDM3,fig.height=7,fig.width=10}
+stackall <- stack(stack.soil,rast) # assemble climatic and soil rasters
+
+rastTrans <- gdm.transform(gdm.3, stackall)
+
+rastDat <- na.omit(getValues(rastTrans))
+pcaSamp <- prcomp(rastDat)
+pcaRast <- predict(rastTrans, pcaSamp, index=1:3)
+
+pcaRast[[1]] <- (pcaRast[[1]]-pcaRast[[1]]@data@min) /
+(pcaRast[[1]]@data@max-pcaRast[[1]]@data@min)*255
+pcaRast[[2]] <- (pcaRast[[2]]-pcaRast[[2]]@data@min) /
+(pcaRast[[2]]@data@max-pcaRast[[2]]@data@min)*255
+pcaRast[[3]] <- (pcaRast[[3]]-pcaRast[[3]]@data@min) /
+(pcaRast[[3]]@data@max-pcaRast[[3]]@data@min)*255
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(pcaRast,add=T,bgalpha=0)
+```
+
+
+### No accounting for geographic distance (without altitude)
+
+```{r RunningGDM,fig.height=7,fig.width=7}
+gdm.4 <- gdm(gdmTab_noalt,geo=F)
+gdm.4$explained
+
+# Leave-one out cross validation
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 34,performance = "r2",geo=F) # R2
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 34,performance = "rmse",geo=F) # RMSE
+
+# Cross validation with 17 folds
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 17,performance = "r2",geo=F)
+
+# Cross validation with 2 folds
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 2,performance = "r2",geo=F)
+
+
+par(mfrow=c(2,2))
+gdm.4.splineDat <- isplineExtract(gdm.4)
+gdm.4.pred <- predict(gdm.4, gdmTab_noalt)
+plot(gdmTab_noalt$distance, gdm.4.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.4.splineDat[[1]][,"bio1"], gdm.4.splineDat[[2]][,"bio1"], type="l",lwd=3, xlab="Mean T° (°C)", ylab="Partial Ecological Distance")
+plot(gdm.4.splineDat[[1]][,"bio5"], gdm.4.splineDat[[2]][,"bio5"], type="l",lwd=3, xlab="Max T° of the warmest month (°C)", ylab="Partial Ecological Distance")
+plot(gdm.4.splineDat[[1]][,"bio12"], gdm.4.splineDat[[2]][,"bio12"], type="l",lwd=3, xlab="Annual precipitation (mm)", ylab="Partial Ecological Distance")
+plot(gdm.4.splineDat[[1]][,"bio14"], gdm.4.splineDat[[2]][,"bio14"], type="l",lwd=3, xlab="Precipitation of the driest month (mm)", ylab="Partial Ecological Distance")
+```
+
+Bad model. 
+
+
+
+```{r VizualizeGDM4,fig.height=7,fig.width=10}
+stackall <- stack(stack.soil,rast) # assemble climatic and soil rasters
+
+rastTrans <- gdm.transform(gdm.4, stackall)
+
+rastDat <- na.omit(getValues(rastTrans))
+pcaSamp <- prcomp(rastDat)
+pcaRast <- predict(rastTrans, pcaSamp, index=1:3)
+
+pcaRast[[1]] <- (pcaRast[[1]]-pcaRast[[1]]@data@min) /
+(pcaRast[[1]]@data@max-pcaRast[[1]]@data@min)*255
+pcaRast[[2]] <- (pcaRast[[2]]-pcaRast[[2]]@data@min) /
+(pcaRast[[2]]@data@max-pcaRast[[2]]@data@min)*255
+pcaRast[[3]] <- (pcaRast[[3]]-pcaRast[[3]]@data@min) /
+(pcaRast[[3]]@data@max-pcaRast[[3]]@data@min)*255
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(pcaRast,add=T,bgalpha=0)
+```
+
+
+Here I kept the first way I used to vizualize the genomic composition. 
+
+```{r VizualizeGDM4FirstMethod,fig.height=7,fig.width=10}
+# load climatic rasters
+grids <- list.files("../../data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
+grids <- c(grids[[1]],grids[[4]],grids[[2]],grids[[3]])
+climrast <- raster::stack(paste0("../../data/climate/Tiff_1901_2009/", grids))
+names(climrast) <- c("bio1","bio5","bio12","bio14")
+
+
+# load soil rasters
+stack.soil <- stack("../../data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif","../../data/soil/STU_EU_T_SAND_WGS84.tif")
+names(stack.soil) <- c("depth_roots","sand_top")
+stack.soil <- crop(stack.soil,extent(rast)) # attribute the extent of climatic raster to soil raster
+stack.soil <- raster::resample(stack.soil,rast) # same number of cells between the soil and climatic rasters
+stack.soil <- mask(stack.soil,shp,updatevalue=NA) # keep only cells within maritime pine distribution 
+
+maskpinpin <- mask(climrast[[1]],shp, updatevalue=NA)
+
+stackall <- stack(stack.soil,rast)
+
+
+#plot(rast)
+rasValue <- raster::extract(stackall, shp,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+rastTrans <- gdm.transform(gdm.4, rasValue[,-1])
+
+# ppcatoraster by hand
+pca <- prcomp(rastTrans, center=TRUE, scale.=FALSE)
+  
+    ##assigns to colors, edit as needed to maximize color contrast, etc.
+  a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+  r <- a1+a2; g <- -a2; b <- a3+a2-a1
+  
+  ##scales colors
+  scalR <- (r-min(r))/(max(r)-min(r))*255
+  scalG <- (g-min(g))/(max(g)-min(g))*255
+  scalB <- (b-min(b))/(max(b)-min(b))*255
+  
+  ##assigns color to raster
+  rast1 <- rast2 <- rast3 <- maskpinpin
+  mapCells <- rasValue$cell
+  rast1[mapCells] <- scalR
+  rast2[mapCells] <- scalG
+  rast3[mapCells] <- scalB
+  ##stacks color rasters
+  outRast <- stack(rast1, rast2, rast3)
+  plotRGB(outRast, r = 1, g = 2, b = 3)
+  
+# 
+#   plot(outRast,
+#      col=grayscale_colors)
+
+#writeRaster(outRast, "../../figs/refSNPs_map.tif", format="GTiff", overwrite=TRUE)
+#rgb <- brick("../../figs/refSNPs_map.tif")
+#writeRaster(outRast, filename="../../figs/multi.grd", bandorder='BIL', overwrite=TRUE)
+```
+
+## Set 2
+
+### Accounting for geographic distance (with altitude)
+
+> Strongly correlated variables !! Maybe it's too correlated...
+
+```{r FormatDataGeoDistAltSet2}
+subdata <- data[,c("prov","latitude_prov","longitude_prov","altitude_prov",select.var2)]
+colnames(subdata) <- c("prov","longitude","latitude","altitude",paste0(str_sub(select.var2,0,-6)))
+
+gdmTab_alt <- formatsitepair(fst, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab_alt)
+```
+
+```{r RunningGDMGeoDistAltSet2,fig.height=7,fig.width=7}
+gdm.6 <- gdm(gdmTab_alt, geo=T)
+
+# Deviance explained
+gdm.6$explained
+
+
+# Leave-one out cross validation
+#sgdm::gdm.cv(gdmTab_alt,nfolds = 34,performance = "r2",geo=T) # R2
+#sgdm::gdm.cv(gdmTab_alt,nfolds = 34,performance = "rmse",geo=T) # RMSE
+
+# Cross validation with 17 folds
+#sgdm::gdm.cv(gdmTab_alt,nfolds = 17,performance = "r2",geo=T)
+
+# Cross validation with 2 folds
+#sgdm::gdm.cv(gdmTab_alt,nfolds = 2,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+# plot(gdm.1) # automatically return all graphs (but with default legends)
+gdm.6.splineDat <- isplineExtract(gdm.6)
+# str(gdm.6.splineDat)
+plot(gdm.6.splineDat$x[,"Geographic"], gdm.6.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial ecological distance") # or ylab= f(Geographic distance)
+gdm.6.pred <- predict.gdm(gdm.6, gdmTab_alt)
+# head(gdm.6.pred)
+
+
+plot(gdmTab_alt$distance, gdm.6.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.6.splineDat[[1]][,"bio12"], gdm.6.splineDat[[2]][,"bio12"], type="l",lwd=3, xlab="Annual precipitation (mm)", ylab="Partial Ecological Distance")
+plot(gdm.6.splineDat[[1]][,"bio1"], gdm.6.splineDat[[2]][,"bio1"], type="l",lwd=3, xlab="Annual T° (°C)", ylab="Partial Ecological Distance")
+plot(gdm.6.splineDat[[1]][,"ppet.min"], gdm.6.splineDat[[2]][,"ppet.min"], type="l",lwd=3, xlab="Minimum PPET", ylab="Partial Ecological Distance")
+plot(gdm.6.splineDat[[1]][,"bio6"], gdm.6.splineDat[[2]][,"bio6"], type="l",lwd=3, xlab="Minimum T° of the coldest month (mm)", ylab="Partial Ecological Distance")
+plot(gdm.6.splineDat[[1]][,"sand_top"], gdm.6.splineDat[[2]][,"sand_top"], type="l",lwd=3, xlab="Sand top (%)", ylab="Partial Ecological Distance")
+plot(gdm.6.splineDat[[1]][,"depth_roots"], gdm.6.splineDat[[2]][,"depth_roots"], type="l",lwd=3, xlab="Depth roots", ylab="Partial Ecological Distance")
+plot(gdm.6.splineDat[[1]][,"altitude"], gdm.6.splineDat[[2]][,"altitude"], type="l",lwd=3, xlab="Altitude", ylab="Partial Ecological Distance")
+```
+
+
+```{r VizualizeGDM6, fig.height=7,fig.width=10}
+stackall <- stack(rast.alt,stack.soil,rast) # assemble climatic and soil rasters
+
+rastTrans <- gdm.transform(gdm.6, stackall)
+
+rastDat <- na.omit(getValues(rastTrans))
+pcaSamp <- prcomp(rastDat)
+pcaRast <- predict(rastTrans, pcaSamp, index=1:3)
+
+pcaRast[[1]] <- (pcaRast[[1]]-pcaRast[[1]]@data@min) /
+(pcaRast[[1]]@data@max-pcaRast[[1]]@data@min)*255
+pcaRast[[2]] <- (pcaRast[[2]]-pcaRast[[2]]@data@min) /
+(pcaRast[[2]]@data@max-pcaRast[[2]]@data@min)*255
+pcaRast[[3]] <- (pcaRast[[3]]-pcaRast[[3]]@data@min) /
+(pcaRast[[3]]@data@max-pcaRast[[3]]@data@min)*255
+
+plotRGB(pcaRast, r=1, g=2, b=3)
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(pcaRast,add=T,bgalpha=0)
+```
+
+
+### Accounting for geographic distance (without altitude)
+
+```{r FormatDataGeoDistSet2}
+subdata <- data[,c("prov","latitude_prov","longitude_prov",select.var2)]
+colnames(subdata) <- c("prov","longitude","latitude",paste0(str_sub(select.var2,0,-6)))
+
+gdmTab_noalt <- formatsitepair(fst, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+```
+
+```{r RunningGDMGeoDistSet2,fig.height=7,fig.width=7}
+gdm.5 <- gdm(gdmTab_noalt, geo=T)
+
+# Deviance explained 
+gdm.5$explained
+
+sum(gdm.5$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+
+# Leave-one out cross validation
+# sgdm::gdm.cv(gdmTab_noalt,nfolds = 34,performance = "r2",geo=T) # R2 # 
+# Error message:  Returning NULL object.Error in UseMethod("predict") : 
+  # pas de méthode pour 'predict' applicable pour un objet de classe "NULL"
+# sgdm::gdm.cv(gdmTab_noalt,nfolds = 34,performance = "rmse",geo=T) # RMSE
+
+# Cross validation with 17 folds
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 17,performance = "r2",geo=T)
+
+# Cross validation with 2 folds
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 2,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 6,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+gdm.5.splineDat <- isplineExtract(gdm.5)
+
+plot(gdm.5.splineDat$x[,"Geographic"], gdm.5.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial ecological distance") # or ylab= f(Geographic distance)
+
+gdm.5.pred <- predict.gdm(gdm.5, gdmTab_noalt) # HERE
+plot(gdmTab_noalt$distance, gdm.5.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.5.splineDat[[1]][,"bio12"], gdm.5.splineDat[[2]][,"bio12"], type="l",lwd=3, xlab="Annual precipitation (mm)", ylab="Partial Ecological Distance")
+plot(gdm.5.splineDat[[1]][,"bio1"], gdm.5.splineDat[[2]][,"bio1"], type="l",lwd=3, xlab="Annual T° (°C)", ylab="Partial Ecological Distance")
+plot(gdm.5.splineDat[[1]][,"ppet.min"], gdm.5.splineDat[[2]][,"ppet.min"], type="l",lwd=3, xlab="Minimum PPET", ylab="Partial Ecological Distance")
+plot(gdm.5.splineDat[[1]][,"bio6"], gdm.5.splineDat[[2]][,"bio6"], type="l",lwd=3, xlab="Minimum T° of the coldest month (mm)", ylab="Partial Ecological Distance")
+plot(gdm.5.splineDat[[1]][,"sand_top"], gdm.5.splineDat[[2]][,"sand_top"], type="l",lwd=3, xlab="Sand top (%)", ylab="Partial Ecological Distance")
+plot(gdm.5.splineDat[[1]][,"depth_roots"], gdm.5.splineDat[[2]][,"depth_roots"], type="l",lwd=3, xlab="Depth roots", ylab="Partial Ecological Distance")
+```
+
+
+Only a small effect of the precipitation of the driest month. The other climatic variables have no effect. Stronger effect of the altitude and the geographic distance.
+
+
+```{r VizualizeGDM5,fig.height=7,fig.width=10}
+stackall <- stack(stack.soil,rast) # assemble climatic and soil rasters
+
+rastTrans <- gdm.transform(gdm.5, stackall) 
+
+rastDat <- na.omit(getValues(rastTrans))
+pcaSamp <- prcomp(rastDat)
+pcaRast <- predict(rastTrans, pcaSamp, index=1:3)
+
+pcaRast[[1]] <- (pcaRast[[1]]-pcaRast[[1]]@data@min) /
+(pcaRast[[1]]@data@max-pcaRast[[1]]@data@min)*255
+pcaRast[[2]] <- (pcaRast[[2]]-pcaRast[[2]]@data@min) /
+(pcaRast[[2]]@data@max-pcaRast[[2]]@data@min)*255
+pcaRast[[3]] <- (pcaRast[[3]]-pcaRast[[3]]@data@min) /
+(pcaRast[[3]]@data@max-pcaRast[[3]]@data@min)*255
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(pcaRast,add=T,bgalpha=0)
+```
+
+
+## Set 3
+
+### Accounting for geographic distance (with altitude)
+
+```{r FormatDataGeoDistAltSet3}
+subdata <- data[,c("prov","latitude_prov","longitude_prov","altitude_prov",select.var3)]
+colnames(subdata) <- c("prov","longitude","latitude","altitude",paste0(str_sub(select.var3,0,-6)))
+
+gdmTab_alt <- formatsitepair(fst, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab_alt)
+```
+
+```{r RunningGDMGeoDistAltSet3,fig.height=7,fig.width=7}
+gdm.7 <- gdm(gdmTab_alt, geo=T)
+
+# Deviance explained
+gdm.7$explained
+
+
+# Leave-one out cross validation
+sgdm::gdm.cv(gdmTab_alt,nfolds = 34,performance = "r2",geo=T) # R2
+sgdm::gdm.cv(gdmTab_alt,nfolds = 34,performance = "rmse",geo=T) # RMSE
+
+# Cross validation with 17 folds
+sgdm::gdm.cv(gdmTab_alt,nfolds = 17,performance = "r2",geo=T)
+
+# Cross validation with 2 folds
+sgdm::gdm.cv(gdmTab_alt,nfolds = 2,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+# plot(gdm.1) # automatically return all graphs (but with default legends)
+gdm.7.splineDat <- isplineExtract(gdm.7)
+# str(gdm.7.splineDat)
+plot(gdm.7.splineDat$x[,"Geographic"], gdm.7.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial ecological distance") # or ylab= f(Geographic distance)
+gdm.7.pred <- predict.gdm(gdm.7, gdmTab_alt)
+# head(gdm.7.pred)
+
+
+plot(gdmTab_alt$distance, gdm.7.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.7.splineDat[[1]][,"bio14"], gdm.7.splineDat[[2]][,"bio14"], type="l",lwd=3, xlab="Minimum Precipitation of the driest month (mm)", ylab="Partial Ecological Distance")
+plot(gdm.7.splineDat[[1]][,"bio1"], gdm.7.splineDat[[2]][,"bio1"], type="l",lwd=3, xlab="Annual T° (°C)", ylab="Partial Ecological Distance")
+plot(gdm.7.splineDat[[1]][,"ppet.mean"], gdm.7.splineDat[[2]][,"ppet.mean"], type="l",lwd=3, xlab="Mean PPET", ylab="Partial Ecological Distance")
+plot(gdm.7.splineDat[[1]][,"sand_top"], gdm.7.splineDat[[2]][,"sand_top"], type="l",lwd=3, xlab="Sand top (%)", ylab="Partial Ecological Distance")
+plot(gdm.7.splineDat[[1]][,"depth_roots"], gdm.7.splineDat[[2]][,"depth_roots"], type="l",lwd=3, xlab="Depth roots", ylab="Partial Ecological Distance")
+plot(gdm.7.splineDat[[1]][,"altitude"], gdm.7.splineDat[[2]][,"altitude"], type="l",lwd=3, xlab="Altitude", ylab="Partial Ecological Distance")
+```
+
+
+```{r VizualizeGDM7, fig.height=7,fig.width=10}
+stackall <- stack(rast.alt,stack.soil,rast) # assemble climatic and soil rasters
+
+rastTrans <- gdm.transform(gdm.7, stackall)
+
+rastDat <- na.omit(getValues(rastTrans))
+pcaSamp <- prcomp(rastDat)
+pcaRast <- predict(rastTrans, pcaSamp, index=1:3)
+
+pcaRast[[1]] <- (pcaRast[[1]]-pcaRast[[1]]@data@min) /
+(pcaRast[[1]]@data@max-pcaRast[[1]]@data@min)*255
+pcaRast[[2]] <- (pcaRast[[2]]-pcaRast[[2]]@data@min) /
+(pcaRast[[2]]@data@max-pcaRast[[2]]@data@min)*255
+pcaRast[[3]] <- (pcaRast[[3]]-pcaRast[[3]]@data@min) /
+(pcaRast[[3]]@data@max-pcaRast[[3]]@data@min)*255
+
+plotRGB(pcaRast, r=1, g=2, b=3)
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(pcaRast,add=T,bgalpha=0)
+```
+
+## Set 4
+
+### Accounting for geographic distance (without altitude)
+
+```{r FormatDataGeoDistSet4}
+subdata <- data[,c("prov","latitude_prov","longitude_prov",select.var4)]
+colnames(subdata) <- c("prov","longitude","latitude",paste0(str_sub(select.var4,0,-6)))
+
+gdmTab_noalt <- formatsitepair(fst, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+```
+
+```{r RunningGDMGeoDistSet4,fig.height=7,fig.width=7}
+gdm.8 <- gdm(gdmTab_noalt, geo=T)
+
+# Deviance explained 
+gdm.8$explained
+
+sum(gdm.8$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+
+# Leave-one out cross validation
+#sgdm::gdm.cv(gdmTab_noalt,nfolds = 34,performance = "r2",geo=T) # R2 # 
+# Error message:  Returning NULL object.Error in UseMethod("predict") : 
+  # pas de méthode pour 'predict' applicable pour un objet de classe "NULL"
+#sgdm::gdm.cv(gdmTab_noalt,nfolds = 34,performance = "rmse",geo=T) # RMSE
+
+# Cross validation with 17 folds
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 17,performance = "r2",geo=T)
+
+# Cross validation with 2 folds
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 2,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab_noalt,nfolds = 6,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+gdm.8.splineDat <- isplineExtract(gdm.8)
+
+plot(gdm.8.splineDat$x[,"Geographic"], gdm.8.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial ecological distance") # or ylab= f(Geographic distance)
+
+gdm.8.pred <- predict.gdm(gdm.8, gdmTab_noalt) # HERE
+plot(gdmTab_noalt$distance, gdm.8.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.8.splineDat[[1]][,"bio14"], gdm.8.splineDat[[2]][,"bio14"], type="l",lwd=3, xlab="Precipitation of the driest month (mm)", ylab="Partial Ecological Distance")
+plot(gdm.8.splineDat[[1]][,"bio1"], gdm.8.splineDat[[2]][,"bio1"], type="l",lwd=3, xlab="Annual T° (°C)", ylab="Partial Ecological Distance")
+plot(gdm.8.splineDat[[1]][,"ppet.mean"], gdm.8.splineDat[[2]][,"ppet.mean"], type="l",lwd=3, xlab="Mean PPET", ylab="Partial Ecological Distance")
+plot(gdm.8.splineDat[[1]][,"ppet.min"], gdm.8.splineDat[[2]][,"ppet.min"], type="l",lwd=3, xlab="Minimum PPET", ylab="Partial Ecological Distance")
+plot(gdm.8.splineDat[[1]][,"sand_top"], gdm.8.splineDat[[2]][,"sand_top"], type="l",lwd=3, xlab="Sand top (%)", ylab="Partial Ecological Distance")
+plot(gdm.8.splineDat[[1]][,"depth_roots"], gdm.8.splineDat[[2]][,"depth_roots"], type="l",lwd=3, xlab="Depth roots", ylab="Partial Ecological Distance")
+```
+
+
+
+```{r VizualizeGDM8,fig.height=7,fig.width=10}
+stackall <- stack(stack.soil,rast) # assemble climatic and soil rasters
+
+rastTrans <- gdm.transform(gdm.8, stackall) 
+
+rastDat <- na.omit(getValues(rastTrans))
+pcaSamp <- prcomp(rastDat)
+pcaRast <- predict(rastTrans, pcaSamp, index=1:3)
+
+pcaRast[[1]] <- (pcaRast[[1]]-pcaRast[[1]]@data@min) /
+(pcaRast[[1]]@data@max-pcaRast[[1]]@data@min)*255
+pcaRast[[2]] <- (pcaRast[[2]]-pcaRast[[2]]@data@min) /
+(pcaRast[[2]]@data@max-pcaRast[[2]]@data@min)*255
+pcaRast[[3]] <- (pcaRast[[3]]-pcaRast[[3]]@data@min) /
+(pcaRast[[3]]@data@max-pcaRast[[3]]@data@min)*255
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(pcaRast,add=T,bgalpha=0)
+```
+
+`r knitr::opts_chunk$set(eval = F)`
+
+
+
+# Interpretation
+
+- Geographic distance is highly important, always the most important variable. Expected in maritime pine.
+
+- Altitude is also very important, and I did not manage to find variables that could replace it (variables that are highly correlated to altitude do not have the same influence on the genomic composition).
+
+- Soil has a small but always different from zero effect (depth roots and sand top)
+
+- Mean precipitation and T° have no effect, it is more variables representing extreme conditions that have an effect, e.g. precipitation of the driest month. 
+
+
+# Building by hand the input dataframe
+
+
+```{r MeltingFstMat,fig.height=7,fig.width=7, eval=F}
+# Dataframe of genetic distance (Fst) between each pair of provenance
+fst <- readRDS(file="../../outputs/GDM/FstMatrices/FstMatrix5165Snps34Provs.rds")
+meltfst <- melt(fst)
+#meltfst <- meltfst %>% select(Var2,Var1,value)
+colnames(meltfst) <- c("prov1","prov2","distance")
+head(meltfst)
+meltfst <- na.omit(meltfst)
+
+
+# Merging with environmental and geographical data
+data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+data <- data %>% select(contains("prov"))
+data <- unique(data)
+data
+
+# Select env variables
+select.var <- c(paste0("bio",c(1,5,12,14),"_prov"),"sand_top_prov","depth_roots_prov")
+
+# MERGING ALL
+# First provenance
+data1 <- data[,c("prov","latitude_prov","longitude_prov","altitude_prov",select.var)]
+colnames(data1) <- c("prov1","s1.xCoord","s1.yCoord","s1.altitude",paste0("s1.",str_sub(select.var,0,-6)))
+
+# Second provenance
+data2 <- data[,c("prov","latitude_prov","longitude_prov","altitude_prov",select.var)]
+colnames(data2) <- c("prov2","s2.xCoord","s2.yCoord","s2.altitude",paste0("s2.",str_sub(select.var,0,-6)))
+
+data <- merge(meltfst,data1,by="prov1")
+data <- merge(data,data2,by="prov2")
+data
+
+# Check if there are some NAs.
+sum(is.na(data))
+
+# Save
+#saveRDS(data,file="../../outputs/GDM/DataPreparedBeforeGDM.rds")
+#data <- readRDS(file="../../outputs/GDM/DataPreparedBeforeGDM.rds")
+
+
+# preparing data
+gdmData <- data[,3:length(colnames(data))]
+gdmData$weights <- 1
+gdmData <- gdmData %>% select(distance,weights, s1.xCoord, s1.yCoord, s2.xCoord, s2.yCoord,everything())
+class(gdmData) <- c("gdmData", "data.frame")
+str(gdmData)
+
+# run
+gdmOutput <- gdm(gdmData,geo = T)
+
+# Deviance explained
+gdmOutput$explained
+
+# plots
+par(mfrow=c(2,2))
+gdmOutput.splineDat <- isplineExtract(gdmOutput)
+plot(gdmOutput.splineDat$x[,"Geographic"], gdmOutput.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial ecological distance") # or ylab= f(Geographic distance)
+gdmOutput.pred <- predict(gdmOutput, gdmData)
+
+
+plot(gdmData$distance, gdmOutput.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+tabTrans <- gdm.transform(gdmOutput, data[,-1])
+tabTrans
+
+plot(gdmOutput.splineDat[[1]][,"bio1"], gdmOutput.splineDat[[2]][,"bio1"], type="l",lwd=3, xlab="Mean T° (°C)", ylab="Partial Ecological Distance")
+plot(gdmOutput.splineDat[[1]][,"bio5"], gdmOutput.splineDat[[2]][,"bio5"], type="l",lwd=3, xlab="T° of the warmest month (°C)", ylab="Partial Ecological Distance")
+plot(gdmOutput.splineDat[[1]][,"bio12"], gdmOutput.splineDat[[2]][,"bio12"], type="l",lwd=3, xlab="Annual precipitation (mm)", ylab="Partial Ecological Distance")
+plot(gdmOutput.splineDat[[1]][,"bio14"], gdmOutput.splineDat[[2]][,"bio14"], type="l",lwd=3, xlab="Precipitation of the driest month (mm)", ylab="Partial Ecological Distance")
+plot(gdmOutput.splineDat[[1]][,"sand_top"], gdmOutput.splineDat[[2]][,"sand_top"], type="l",lwd=3, xlab="Sand top (%)", ylab="Partial Ecological Distance")
+plot(gdmOutput.splineDat[[1]][,"depth_roots"], gdmOutput.splineDat[[2]][,"depth_roots"], type="l",lwd=3, xlab="Depth roots", ylab="Partial Ecological Distance")
+plot(gdmOutput.splineDat[[1]][,"altitude"], gdmOutput.splineDat[[2]][,"altitude"], type="l",lwd=3, xlab="Altitude", ylab="Partial Ecological Distance")
+
+```
+
+This is the same as before (when using the 'formatsitepair' function), great. 
