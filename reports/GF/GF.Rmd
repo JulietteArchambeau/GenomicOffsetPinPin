@@ -59,6 +59,23 @@ library(gradientForest) # install.packages("gradientForest", repos="http://R-For
 
 - warning when running the models: "Warning in randomForest.default(m, y, ...): The response has five or fewer unique values. Are you sure you want to do regression?" In `?gradientForest`, " If the species are numeric variables, a regression forest is calculated. If the species are factor variables, a classification forest is calculated."
 
+```{r Functions}
+PredictAcrossRange <- function(x){
+  
+  rasValue <- raster::extract(x, shp,cellnumbers=T)
+  rasValue <- as.data.frame(rasValue)
+  rasValue <- na.omit(rasValue)
+  
+  # transform env using gf models, see ?predict.gradientForest
+  predFut <- predict(gf, rasValue[,-1])
+  
+  # calculate euclidean distance between current and future genetic spaces  
+  return(sqrt((projCurResWorldClim[,1]-predFut[,1])^2+(projCurResWorldClim[,2]-predFut[,2])^2
+                    +(projCurResWorldClim[,3]-predFut[,3])^2+(projCurResWorldClim[,4]-predFut[,4])^2
+                    +(projCurResWorldClim[,5]-predFut[,5])^2+(projCurResWorldClim[,6]-predFut[,6])^2))
+}
+```
+
 
 # BEFORE SELECTION
 
@@ -599,20 +616,20 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 #### Genomic offset
 
 ```{r GenomicOffsetSet5}
-stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,"LowRes.grd"))
+stackall <- stack(paste0("../../data/StacksEnvVars/CurStacksResWorldClim/",stack.name,"ResWorldClim.grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)
 rasValue <- na.omit(rasValue)
 
 # transform env using gf models, see ?predict.gradientForest
-projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+projCurResWorldClim <- predict(gf, rasValue[,-1]) # remove cell column before transforming
 
 
 # calculate euclidean distance between current and future genetic spaces  
-genOffBS <- sqrt((projCur[,1]-predFut[,1])^2+(projCur[,2]-predFut[,2])^2
-                    +(projCur[,3]-predFut[,3])^2+(projCur[,4]-predFut[,4])^2
-                    +(projCur[,5]-predFut[,5])^2+(projCur[,6]-predFut[,6])^2)
+genOffBS <- sqrt((projCurResWorldClim[,1]-predFut[,1])^2+(projCurResWorldClim[,2]-predFut[,2])^2
+                    +(projCurResWorldClim[,3]-predFut[,3])^2+(projCurResWorldClim[,4]-predFut[,4])^2
+                    +(projCurResWorldClim[,5]-predFut[,5])^2+(projCurResWorldClim[,6]-predFut[,6])^2)
 
 
 # assign values to raster - can be tricky if current/future climate
@@ -624,6 +641,63 @@ rast.go[rasValue$cell] <- genOffBS
 plot(rast.go)
 ```
 
+
+#### Future climate - All GCMs (SSP370)
+
+
+```{r Set5BeforeSelectionFutClimAllGCMsCalculateGO}
+path="../../data/StacksEnvVars/FutClimStacks/2041to2060/"
+fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
+# Load the stacks in a list
+fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
+
+# Calculate the GO for each GCM
+genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
+
+# convert to DF 
+dfGOallGCMs <- as.data.frame(genOffallGCMs)
+```
+
+```{r Set5BeforeSelectionFutClimAllGCMsPlots, fig.height=5,fig.width=6}
+# Distribution of the genomic offset for each GCM
+dfGOallGCMs %>%  
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+
+dfGOallGCMs$mean <- apply(dfGOallGCMs,1,mean)
+dfGOallGCMs$sd <- apply(dfGOallGCMs,1,sd)
+dfGOallGCMs$sdSup <- dfGOallGCMs$mean + dfGOallGCMs$sd
+dfGOallGCMs$sdInf <- dfGOallGCMs$mean - dfGOallGCMs$sd
+dfGOallGCMs$seSup <- dfGOallGCMs$mean + dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+dfGOallGCMs$seInf <- dfGOallGCMs$mean - dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+
+
+# Distribution of mean GO and its SE
+dfGOallGCMs %>%  
+  dplyr::select(mean,seSup,seInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Distribution of mean GO and SD Supp and Inf
+dfGOallGCMs %>%  
+  dplyr::select(mean,sdSup,sdInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Keeping mean and SD for futher analyses
+DFtot <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanBS=mean,SdBS=sd)
+```
 
 # AFTER SELECTION in Madrid and Caceres
 
@@ -775,7 +849,7 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-#### Future climate
+#### Future climate (SSP245)
 
 ```{r MappingOutputsSet5FutClimAfterSelectionCacMad, fig.height=11,fig.width=14}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name.fut,".grd"))
@@ -814,20 +888,20 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 #### Genomic offset
 
 ```{r GenomicOffsetSet5AfterSelectionCacMad}
-stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,"LowRes.grd"))
+stackall <- stack(paste0("../../data/StacksEnvVars/CurStacksResWorldClim/",stack.name,"ResWorldClim.grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)
 rasValue <- na.omit(rasValue)
 
 # transform env using gf models, see ?predict.gradientForest
-projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+projCurResWorldClim <- predict(gf, rasValue[,-1]) # remove cell column before transforming
 
 
 # calculate euclidean distance between current and future genetic spaces  
-genOffAScacmad <- sqrt((projCur[,1]-predFut[,1])^2+(projCur[,2]-predFut[,2])^2
-                    +(projCur[,3]-predFut[,3])^2+(projCur[,4]-predFut[,4])^2
-                    +(projCur[,5]-predFut[,5])^2+(projCur[,6]-predFut[,6])^2)
+genOffAScacmad <- sqrt((projCurResWorldClim[,1]-predFut[,1])^2+(projCurResWorldClim[,2]-predFut[,2])^2
+                    +(projCurResWorldClim[,3]-predFut[,3])^2+(projCurResWorldClim[,4]-predFut[,4])^2
+                    +(projCurResWorldClim[,5]-predFut[,5])^2+(projCurResWorldClim[,6]-predFut[,6])^2)
 
 
 # assign values to raster - can be tricky if current/future climate
@@ -838,7 +912,66 @@ rast.go <- stackall[[1]]
 rast.go[rasValue$cell] <- genOffAScacmad
 plot(rast.go)
 ```
-  
+
+
+#### Future climate - All GCMs (SSP370)
+
+
+```{r Set5AfterSelectionCacMadFutClimAllGCMsCalculateGO}
+path="../../data/StacksEnvVars/FutClimStacks/2041to2060/"
+fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
+# Load the stacks in a list
+fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
+
+# Calculate the GO for each GCM
+genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
+
+# convert to DF 
+dfGOallGCMs <- as.data.frame(genOffallGCMs)
+```
+
+```{r Set5AfterSelectionCacMadFutClimAllGCMsPlots, fig.height=5,fig.width=6}
+# Distribution of the genomic offset for each GCM
+dfGOallGCMs %>%  
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+
+dfGOallGCMs$mean <- apply(dfGOallGCMs,1,mean)
+dfGOallGCMs$sd <- apply(dfGOallGCMs,1,sd)
+dfGOallGCMs$sdSup <- dfGOallGCMs$mean + dfGOallGCMs$sd
+dfGOallGCMs$sdInf <- dfGOallGCMs$mean - dfGOallGCMs$sd
+dfGOallGCMs$seSup <- dfGOallGCMs$mean + dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+dfGOallGCMs$seInf <- dfGOallGCMs$mean - dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+
+
+# Distribution of mean GO and its SE
+dfGOallGCMs %>%  
+  dplyr::select(mean,seSup,seInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Distribution of mean GO and SD Supp and Inf
+dfGOallGCMs %>%  
+  dplyr::select(mean,sdSup,sdInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Keeping mean and SD for futher analyses
+dfGOallGCMs <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanASmadcac=mean,SdASmadcac=sd)
+DFtot <- bind_cols(DFtot,dfGOallGCMs)
+```
+
 
 # AFTER SELECTION in Caceres
 
@@ -1029,20 +1162,20 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 #### Genomic offset
 
 ```{r GenomicOffsetSet5AfterSelectionCacOnly}
-stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,"LowRes.grd"))
+stackall <- stack(paste0("../../data/StacksEnvVars/CurStacksResWorldClim/",stack.name,"ResWorldClim.grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)
 rasValue <- na.omit(rasValue)
 
 # transform env using gf models, see ?predict.gradientForest
-projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+projCurResWorldClim <- predict(gf, rasValue[,-1]) # remove cell column before transforming
 
 
 # calculate euclidean distance between current and future genetic spaces  
-genOffAScac <- sqrt((projCur[,1]-predFut[,1])^2+(projCur[,2]-predFut[,2])^2
-                    +(projCur[,3]-predFut[,3])^2+(projCur[,4]-predFut[,4])^2
-                    +(projCur[,5]-predFut[,5])^2+(projCur[,6]-predFut[,6])^2)
+genOffAScac <- sqrt((projCurResWorldClim[,1]-predFut[,1])^2+(projCurResWorldClim[,2]-predFut[,2])^2
+                    +(projCurResWorldClim[,3]-predFut[,3])^2+(projCurResWorldClim[,4]-predFut[,4])^2
+                    +(projCurResWorldClim[,5]-predFut[,5])^2+(projCurResWorldClim[,6]-predFut[,6])^2)
 
 
 # assign values to raster - can be tricky if current/future climate
@@ -1054,7 +1187,7 @@ rast.go[rasValue$cell] <- genOffAScac
 plot(rast.go)
 ```
   
-```{r ComparingBeforeAndAfterSelectionSet5CacOnly,fig.width=12}
+```{r ComparingBeforeAndAfterSelectionSet5CacOnly,fig.width=9}
 GO <- data.frame(BS=genOffBS,AS=genOffAScacmad, AScac=genOffAScac)
 GO <- GO %>%  pivot_longer(cols=everything(),names_to="subset",values_to="go")
 ggplot(GO, aes(x=go,color=subset)) + 
@@ -1073,6 +1206,90 @@ ggplot(GO, aes(x=subset, y=go, fill=subset)) +
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank())
 ```
+
+
+#### Future climate - All GCMs (SSP370)
+
+
+```{r Set5AfterSelectionCacOnlyFutClimAllGCMsCalculateGO}
+path="../../data/StacksEnvVars/FutClimStacks/2041to2060/"
+fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
+# Load the stacks in a list
+fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
+
+# Calculate the GO for each GCM
+genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
+
+# convert to DF 
+dfGOallGCMs <- as.data.frame(genOffallGCMs)
+```
+
+```{r Set5AfterSelectionCacOnlyFutClimAllGCMsPlots, fig.height=5,fig.width=10}
+# Distribution of the genomic offset for each GCM
+dfGOallGCMs %>%  
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+
+dfGOallGCMs$mean <- apply(dfGOallGCMs,1,mean)
+dfGOallGCMs$sd <- apply(dfGOallGCMs,1,sd)
+dfGOallGCMs$sdSup <- dfGOallGCMs$mean + dfGOallGCMs$sd
+dfGOallGCMs$sdInf <- dfGOallGCMs$mean - dfGOallGCMs$sd
+dfGOallGCMs$seSup <- dfGOallGCMs$mean + dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+dfGOallGCMs$seInf <- dfGOallGCMs$mean - dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+
+
+# Distribution of mean GO and its SE
+dfGOallGCMs %>%  
+  dplyr::select(mean,seSup,seInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Distribution of mean GO and SD Supp and Inf
+dfGOallGCMs %>%  
+  dplyr::select(mean,sdSup,sdInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Comparing with BeforeSelection and AfterSelectionCacMad
+dfGOallGCMs <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanAScac=mean,SdAScac=sd)
+DFtot <- bind_cols(DFtot,dfGOallGCMs)
+
+DFtot %>% 
+  pivot_longer(cols=contains("Mean"),names_to="subset",values_to="go") %>% 
+  ggplot(aes(x=go,color=subset)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")  +
+    scale_color_discrete(name = "Subset of\n genotypes", labels = c("After selection in Caceres",
+                                                                    "After selection in Madrid and Caceres",
+                                                                    "Before Selection"))
+DFtot %>% 
+  pivot_longer(cols=contains("Mean"),names_to="subset",values_to="go") %>% 
+  ggplot(aes(x=subset, y=go, fill=subset)) + 
+    geom_boxplot(alpha=0.6) + 
+    theme_bw() +
+    scale_fill_discrete(name = "Subset of\n genotypes",
+                      labels = c("After selection in Caceres",
+                                 "After selection in Madrid and Caceres",
+                                 "Before Selection")) +
+    ylab("Genomic offset") +
+    theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+
+To show se instead of sd in the barplots: https://stackoverflow.com/questions/25999677/how-to-plot-mean-and-standard-error-in-boxplot-in-r
 
 
 `r knitr::opts_chunk$set(eval = F)`
