@@ -4,6 +4,7 @@
 
 
 library(raster)
+library(stringr)
 
 # Maritime pine distribution from EUFORGEN (shapefile)
 shp  <- shapefile('../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/Pinus_pinaster_EUFORGEN.shp')
@@ -114,6 +115,41 @@ writeRaster(stackall,"data/StacksEnvVars/StackSoilClimSet5.grd", format="raster"
 
 rast.to.crop <- raster("data/climate/Tiff_1901_2009/map_bio1_1901-2009_with_34_sampling_points.tif")
 
+GCMs <- list.files("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/")
+
+# 2041-2060 - SSP370 ####
+
+for(i in GCMs){
+  
+  rast <- stack(paste0("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/",i,"/ssp370/wc2.1_2.5m_bioc_",i,"_ssp370_2041-2060.tif"))
+  
+  # I understand that these variables here are the WorldClim bioclimatic variables averaged over the period 2041/2060.
+  
+  select.layers <- names(rast)[grepl("2060.13|2060.14|2060.5|2060.6",names(rast))==T]
+  rast <- raster::subset(rast,select.layers)
+  names(rast) <- c("bio5","bio6","bio13","bio14")
+  rast <- rast[[c("bio13","bio14","bio5","bio6")]]
+  rast <- raster::crop(rast,extent(rast.to.crop))
+  rast <- mask(rast,shp, updatevalue=NA)
+  
+  
+  # Soil rasters ####
+  stack.soil <- stack("data/soil/STU_EU_T_SAND_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+  names(stack.soil) <- c("sand_top","depth_roots")
+  stack.soil <- raster::crop(stack.soil,extent(rast)) # attribute the extent of climatic raster to soil raster
+  stack.soil <- raster::resample(stack.soil,rast) # same number of cells between the soil and climatic rasters
+  stack.soil <- mask(stack.soil,shp,updatevalue=NA) # keep only cells within maritime pine distribution 
+  
+  # >> Save without altitude
+  stackall <- stack(rast,stack.soil)
+  writeRaster(stackall, 
+              filename=paste0("data/StacksEnvVars/FutClimStacks/2041to2060/StackSoilClimSet5_",str_remove_all(i,"-"),".grd"), format="raster",overwrite=TRUE)
+  
+}
+
+
+# 2041-2060 - SSP245 ####
+
 ssp245_2041_2060 <- stack("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/BCC-CSM2-MR/ssp245/wc2.1_2.5m_bioc_BCC-CSM2-MR_ssp245_2041-2060.tif")
 
 # I understand that these variables here are the WorldClim bioclimatic variables averaged over the period 2041/2060.
@@ -142,7 +178,7 @@ writeRaster(stackall, filename="data/StacksEnvVars/FutClimStackSoilClimSet5.grd"
 
 # >>> CURRENT DATA FOR GENOMIC OFFSET CALCULATION ####
 
-rast.to.crop <- stack("data/StacksEnvVars/FutClimStackSoilClimSet5.grd")
+rast.to.crop <- stack("data/StacksEnvVars/FutClimStacks/2041to2060/StackSoilClimSet5_BCCCSM2MR.grd")
 
 # Climatic rasters - Set 5 ####
 grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
@@ -162,6 +198,8 @@ stack.soil <- mask(stack.soil,shp,updatevalue=NA) # keep only cells within marit
 
 # >> Save without altitude
 stackall <- stack(rast,stack.soil)
-writeRaster(stackall, filename="data/StacksEnvVars/StackSoilClimSet5LowRes.grd", format="raster",overwrite=TRUE)
+writeRaster(stackall, filename="data/StacksEnvVars/CurStacksResWorldClim/StackSoilClimSet5ResWorldClim.grd", 
+            format="raster",
+            overwrite=TRUE)
 
 
