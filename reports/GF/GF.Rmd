@@ -45,7 +45,7 @@ pre[class] {
 ```
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(cache=F)
+knitr::opts_chunk$set(cache=T)
 options(width = 300)
 library(knitr)
 library(dplyr)
@@ -55,11 +55,14 @@ library(adespatial)
 library(gradientForest) # install.packages("gradientForest", repos="http://R-Forge.R-project.org")
 ```
 
-# Comments
+> Comments
 
 - warning when running the models: "Warning in randomForest.default(m, y, ...): The response has five or fewer unique values. Are you sure you want to do regression?" In `?gradientForest`, " If the species are numeric variables, a regression forest is calculated. If the species are factor variables, a classification forest is calculated."
 
-# Loading and preparing data
+
+# BEFORE SELECTION
+
+## Loading and preparing data
 
 
 > Provenance coordinates
@@ -148,9 +151,9 @@ shp  <- shapefile('../../../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/
 ```
 
 
-# Set 1
+## Set 1
 
-## With altitude
+### With altitude
 
 ```{r VarSet1Alt}
 select.var <- select.var1
@@ -183,9 +186,6 @@ gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
                         maxLevel=maxLevel, trace=T, corr.threshold=0.50)
 saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
 ```
-
-
-
 
 ```{r LoadGFSet1Alt, echo=F}
 gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
@@ -233,8 +233,7 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-## Without altitude
-
+### Without altitude
 
 ```{r VarSet1}
 select.var <- select.var1
@@ -314,9 +313,9 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 ```
 
 
-# Set 2
+## Set 2
 
-## With altitude
+### With altitude
 
 ```{r VarSet2Alt}
 select.var <- select.var2
@@ -396,7 +395,7 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-## Without altitude
+### Without altitude
 
 ```{r VarSet2}
 select.var <- select.var2
@@ -477,11 +476,11 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 
 
 
-# Set 5
+## Set 5
 
-## Without altitude
+### Without altitude
 
-### Current climate 
+#### Current climate 
 
 ```{r VarSet5}
 select.var <- select.var5
@@ -561,8 +560,7 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-### Future climate
-
+#### Future climate
 
 ```{r MappingOutputsSet5FutClim, fig.height=11,fig.width=14}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name.fut,".grd"))
@@ -598,7 +596,7 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-### Genomic offset
+#### Genomic offset
 
 ```{r GenomicOffsetSet5}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,"LowRes.grd"))
@@ -612,7 +610,7 @@ projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
 
 
 # calculate euclidean distance between current and future genetic spaces  
-genOff <- sqrt((projCur[,1]-predFut[,1])^2+(projCur[,2]-predFut[,2])^2
+genOffBS <- sqrt((projCur[,1]-predFut[,1])^2+(projCur[,2]-predFut[,2])^2
                     +(projCur[,3]-predFut[,3])^2+(projCur[,4]-predFut[,4])^2
                     +(projCur[,5]-predFut[,5])^2+(projCur[,6]-predFut[,6])^2)
 
@@ -621,8 +619,460 @@ genOff <- sqrt((projCur[,1]-predFut[,1])^2+(projCur[,2]-predFut[,2])^2
 # rasters are not identical in terms of # cells, extent, etc.
 values <- raster::extract(stackall, shp,cellnumbers=T)
 
-rastt<- stackall[[1]]
-rastt[rasValue$cell] <- genOff
-plot(rastt)
+rast.go <- stackall[[1]]
+rast.go[rasValue$cell] <- genOffBS
+plot(rast.go)
 ```
 
+
+# AFTER SELECTION in Madrid and Caceres
+
+Here we remove the genotypes for which no individual has survived neither in Madrid nor in Cáceres. 
+
+## Loading new genotypic frequencies
+
+> Extracting the genotype names to be selected 
+
+```{r ExtractGenotypeNamesCacMad}
+temp.data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+
+# Removing genotypes for which there is no genomic data
+temp.data <- temp.data[!(is.na(temp.data$Q1)),]
+
+# Keep only data from Caceres and Madrid (the dry sites) 
+temp.data <- temp.data[temp.data$site=="caceres"|temp.data$site=="madrid",]
+
+# Keep only survivors
+temp.data <- temp.data[temp.data$survival==1,]
+
+# Vectors of genotypes for which at least one indivdual survive to drought
+geno.names.sub <- unique(temp.data$clon)
+rm(temp.data)
+
+# How many genotypes?
+length(geno.names.sub)
+```
+
+
+> Load and prepare new genomic data
+
+```{r GenomicNewDataMungingCacMad,eval=F}
+# File with the genotype names (clone names)
+geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
+
+# File with the genotype of each clone for each SNP
+geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
+
+# Removing the first two columns with allele info (A,T, G or C)
+geno <- geno[,3:dim(geno)[[2]]]
+
+# Give the genotype name for each column of geno
+colnames(geno) <- rownames(geno_names)
+
+rm(geno_names)
+
+# Select only genotypes which has at least one survivor
+geno <- geno %>% dplyr::select(all_of(geno.names.sub))
+
+geno <-  as_tibble(t(geno), rownames = "rownames") %>% 
+  mutate(rownames=str_sub(rownames,1,3)) %>% 
+  dplyr::rename(prov = rownames) %>% 
+  group_by(prov) %>% 
+  summarise_all(~sum(., na.rm = TRUE)/(n()*2))
+
+saveRDS(geno,file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesAfterSelectionCacMad.rds")
+```
+
+```{r LoadNewGenoPreparedCacMad,echo=F}
+geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesAfterSelectionCacMad.rds")
+```
+
+
+## Set 5
+
+### Without altitude
+
+#### Current climate 
+
+```{r VarSet5AfterSelectionCacMad}
+select.var <- select.var5
+model.name <- "gfSet5AfterSelectionCacMad"
+stack.name <- "StackSoilClimSet5"
+stack.name.fut <- "FutClimStackSoilClimSet5"
+```
+
+```{r GFSet5AfterSelectionCacMad, eval=F}
+subdata <- data[,c("prov",select.var)]
+colnames(subdata) <- c("prov",paste0(str_sub(c(select.var),0,-6)))
+
+df <- dplyr::inner_join(mem,subdata,by="prov")
+df <- inner_join(df,geno,by="prov")
+df[1:10,1:20]
+
+
+# read in data file with minor allele freqs & env/space variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+envGF[1:10,]
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# build individual SNP datasets
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+SNPs[1:10,1:10]
+
+# Fit gf models for reference SNPs 
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
+```
+
+Lots of warnings: "The response has five or fewer unique values.  Are you sure you want to do regression?"
+Some info here: https://nickfountainjones.wordpress.com/tag/r/
+
+```{r LoadGFSet5AfterSelectionCacMad, echo=F}
+gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
+```
+
+```{r PlotGFSet5AfterSelectionCacMad, fig.height=6,fig.width=8}
+plot(gf, plot.type="Overall.Importance")
+plot(gf, plot.type="Split.Density")
+#plot(gf, plot.type="Cumulative.Importance")
+#plot(gf, plot.type="Cumulative.Importance",plot.args = list(impt.vars=c("bio14","bio5")))
+plot(gf, plot.type="Performance")
+```
+
+```{r MappingOutputsSet5AfterSelectionCacMad, fig.height=11,fig.width=14}
+stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
+
+rasValue <- raster::extract(stackall, shp,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+# transform env using gf models, see ?predict.gradientForest
+projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+
+# ppcatoraster by hand
+pca <- prcomp(projCur, center=TRUE, scale.=FALSE)
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackall[[1]]
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plotRGB(outRast, r = 1, g = 3, b = 2)
+# plotRGB(outRast, r = 3, g = 1, b = 2)
+```
+
+#### Future climate
+
+```{r MappingOutputsSet5FutClimAfterSelectionCacMad, fig.height=11,fig.width=14}
+stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name.fut,".grd"))
+
+rasValue <- raster::extract(stackall, shp,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+# transform env using gf models, see ?predict.gradientForest
+predFut <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+
+# ppcatoraster by hand
+pca <- prcomp(predFut, center=TRUE, scale.=FALSE)
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackall[[1]]
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plotRGB(outRast, r = 1, g = 3, b = 2)
+# plotRGB(outRast, r = 3, g = 1, b = 2)
+```
+
+#### Genomic offset
+
+```{r GenomicOffsetSet5AfterSelectionCacMad}
+stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,"LowRes.grd"))
+
+rasValue <- raster::extract(stackall, shp,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+# transform env using gf models, see ?predict.gradientForest
+projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+
+
+# calculate euclidean distance between current and future genetic spaces  
+genOffAScacmad <- sqrt((projCur[,1]-predFut[,1])^2+(projCur[,2]-predFut[,2])^2
+                    +(projCur[,3]-predFut[,3])^2+(projCur[,4]-predFut[,4])^2
+                    +(projCur[,5]-predFut[,5])^2+(projCur[,6]-predFut[,6])^2)
+
+
+# assign values to raster - can be tricky if current/future climate
+# rasters are not identical in terms of # cells, extent, etc.
+values <- raster::extract(stackall, shp,cellnumbers=T)
+
+rast.go <- stackall[[1]]
+rast.go[rasValue$cell] <- genOffAScacmad
+plot(rast.go)
+```
+  
+
+# AFTER SELECTION in Caceres
+
+## Loading new genotypic frequencies
+
+> Extracting the genotype names to be selected 
+
+```{r ExtractGenotypeNamesCacOnly}
+temp.data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+
+# Removing genotypes for which there is no genomic data
+temp.data <- temp.data[!(is.na(temp.data$Q1)),]
+
+# Keep only data from Caceres and Madrid (the dry sites) 
+temp.data <- temp.data[temp.data$site=="caceres",]
+
+# Keep only survivors
+temp.data <- temp.data[temp.data$survival==1,]
+
+# Vectors of genotypes for which at least one indivdual survive to drought
+geno.names.sub <- unique(temp.data$clon)
+rm(temp.data)
+
+# How many genotypes?
+length(geno.names.sub)
+```
+
+
+> Load and prepare new genomic data
+
+```{r GenomicNewDataMungingCacOnly, eval=F}
+# File with the genotype names (clone names)
+geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
+
+# File with the genotype of each clone for each SNP
+geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
+
+# Removing the first two columns with allele info (A,T, G or C)
+geno <- geno[,3:dim(geno)[[2]]]
+
+# Give the genotype name for each column of geno
+colnames(geno) <- rownames(geno_names)
+
+rm(geno_names)
+
+# Select only genotypes which has at least one survivor
+geno <- geno %>% dplyr::select(all_of(geno.names.sub))
+
+geno <-  as_tibble(t(geno), rownames = "rownames") %>% 
+  mutate(rownames=str_sub(rownames,1,3)) %>% 
+  dplyr::rename(prov = rownames) %>% 
+  group_by(prov) %>% 
+  summarise_all(~sum(., na.rm = TRUE)/(n()*2))
+
+saveRDS(geno,file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesAfterSelectionCacOnly.rds")
+```
+
+```{r LoadNewGenoPreparedCacOnly,echo=F}
+geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesAfterSelectionCacOnly.rds")
+```
+
+
+## Set 5
+
+### Without altitude
+
+#### Current climate 
+
+```{r VarSet5AfterSelectionCacOnly}
+select.var <- select.var5
+model.name <- "gfSet5AfterSelectionCacOnly"
+stack.name <- "StackSoilClimSet5"
+stack.name.fut <- "FutClimStackSoilClimSet5"
+```
+
+```{r GFSet5AfterSelectionCacOnly, eval=F}
+subdata <- data[,c("prov",select.var)]
+colnames(subdata) <- c("prov",paste0(str_sub(c(select.var),0,-6)))
+
+df <- dplyr::inner_join(mem,subdata,by="prov")
+df <- inner_join(df,geno,by="prov")
+df[1:10,1:20]
+
+
+# read in data file with minor allele freqs & env/space variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+envGF[1:10,]
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# build individual SNP datasets
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+SNPs[1:10,1:10]
+
+# Fit gf models for reference SNPs 
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
+```
+
+
+
+Lots of warnings: "The response has five or fewer unique values.  Are you sure you want to do regression?"
+Some info here: https://nickfountainjones.wordpress.com/tag/r/
+
+```{r LoadGFSet5AfterSelectionCacOnly, echo=F}
+gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
+```
+
+```{r PlotGFSet5AfterSelectionCacOnly, fig.height=6,fig.width=8}
+plot(gf, plot.type="Overall.Importance")
+plot(gf, plot.type="Split.Density")
+#plot(gf, plot.type="Cumulative.Importance")
+#plot(gf, plot.type="Cumulative.Importance",plot.args = list(impt.vars=c("bio14","bio5")))
+plot(gf, plot.type="Performance")
+```
+
+```{r MappingOutputsSet5AfterSelectionCacOnly, fig.height=11,fig.width=14}
+stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
+
+rasValue <- raster::extract(stackall, shp,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+# transform env using gf models, see ?predict.gradientForest
+projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+
+# ppcatoraster by hand
+pca <- prcomp(projCur, center=TRUE, scale.=FALSE)
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackall[[1]]
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plotRGB(outRast, r = 1, g = 3, b = 2)
+# plotRGB(outRast, r = 3, g = 1, b = 2)
+```
+
+#### Future climate
+
+```{r MappingOutputsSet5FutClimAfterSelectionCacOnly, fig.height=11,fig.width=14}
+stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name.fut,".grd"))
+
+rasValue <- raster::extract(stackall, shp,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+# transform env using gf models, see ?predict.gradientForest
+predFut <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+
+# ppcatoraster by hand
+pca <- prcomp(predFut, center=TRUE, scale.=FALSE)
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackall[[1]]
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plotRGB(outRast, r = 1, g = 3, b = 2)
+# plotRGB(outRast, r = 3, g = 1, b = 2)
+```
+
+#### Genomic offset
+
+```{r GenomicOffsetSet5AfterSelectionCacOnly}
+stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,"LowRes.grd"))
+
+rasValue <- raster::extract(stackall, shp,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+# transform env using gf models, see ?predict.gradientForest
+projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+
+
+# calculate euclidean distance between current and future genetic spaces  
+genOffAScac <- sqrt((projCur[,1]-predFut[,1])^2+(projCur[,2]-predFut[,2])^2
+                    +(projCur[,3]-predFut[,3])^2+(projCur[,4]-predFut[,4])^2
+                    +(projCur[,5]-predFut[,5])^2+(projCur[,6]-predFut[,6])^2)
+
+
+# assign values to raster - can be tricky if current/future climate
+# rasters are not identical in terms of # cells, extent, etc.
+values <- raster::extract(stackall, shp,cellnumbers=T)
+
+rast.go <- stackall[[1]]
+rast.go[rasValue$cell] <- genOffAScac
+plot(rast.go)
+```
+  
+```{r ComparingBeforeAndAfterSelectionSet5CacOnly,fig.width=12}
+GO <- data.frame(BS=genOffBS,AS=genOffAScacmad, AScac=genOffAScac)
+GO <- GO %>%  pivot_longer(cols=everything(),names_to="subset",values_to="go")
+ggplot(GO, aes(x=go,color=subset)) + 
+  geom_density(size=1.5) +
+  theme_bw() + 
+  xlab("Genomic offset") +
+  scale_color_discrete(name = "Subset of\n genotypes", labels = c("After selection in Madrid and Caceres","After selection in Caceres","Before Selection"))
+
+
+ggplot(GO, aes(x=subset, y=go, fill=subset)) + 
+  geom_boxplot(alpha=0.6) + 
+  theme_bw() +
+  scale_fill_discrete(name = "Subset of\n genotypes", labels = c("After selection in Madrid and Caceres","After selection in Caceres","Before Selection")) +
+  ylab("Genomic offset") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+
+
+`r knitr::opts_chunk$set(eval = F)`
