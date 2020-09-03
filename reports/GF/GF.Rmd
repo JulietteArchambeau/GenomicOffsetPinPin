@@ -1,7 +1,7 @@
 ---
 title: "Gradient Forest"
 author: "Juliette Archambeau"
-date: "17 juillet 2020"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   html_document:
     # code_fold: hide
@@ -53,7 +53,13 @@ library(tidyverse)
 library(raster)
 library(adespatial)
 library(gradientForest) # install.packages("gradientForest", repos="http://R-Forge.R-project.org")
+library(vegan)
 ```
+
+All these analyses are based on the paper of [Fitzpatrick and Keller (2014)](https://onlinelibrary.wiley.com/doi/full/10.1111/ele.12376). 
+
+https://www.biorxiv.org/content/10.1101/871251v1.full
+
 
 > Comments
 
@@ -160,6 +166,14 @@ saveRDS(geno,file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.r
 geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.rds")
 ```
 
+```{r RmMinorAlleleFrequencies}
+vec <- apply(geno[,-1],2,function(x) length(unique(x)))
+vecsup <- vec[vec>5]
+snps <- names(vecsup)
+genoMAF <- geno %>% dplyr::select(contains(c("prov",snps)))
+```
+
+
 > Maritime pine distribution (mask for the raster of predictions)
 
 ```{r LoadPinPinasterDistri}
@@ -208,15 +222,13 @@ saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
 gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
 ```
 
-```{r PlotGFSet1Alt, fig.height=6,fig.width=8}
+```{r PlotGFSet1Alt, fig.height=4,fig.width=8}
 plot(gf, plot.type="Overall.Importance")
 plot(gf, plot.type="Split.Density")
-#plot(gf, plot.type="Cumulative.Importance")
-#plot(gf, plot.type="Cumulative.Importance",plot.args = list(impt.vars=c("bio14","bio5")))
 plot(gf, plot.type="Performance")
 ```
 
-```{r MappingOutputsSet1Alt, fig.height=11,fig.width=14}
+```{r MappingOutputsSet1Alt, fig.height=8,fig.width=10}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
@@ -287,15 +299,13 @@ saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
 gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
 ```
 
-```{r PlotGFSet1, fig.height=6,fig.width=8}
+```{r PlotGFSet1, fig.height=4,fig.width=8}
 plot(gf, plot.type="Overall.Importance")
-plot(gf, plot.type="Split.Density")
-#plot(gf, plot.type="Cumulative.Importance")
-#plot(gf, plot.type="Cumulative.Importance",plot.args = list(impt.vars=c("bio14","bio5")))
-plot(gf, plot.type="Performance")
+#plot(gf, plot.type="Split.Density")
+#plot(gf, plot.type="Performance")
 ```
 
-```{r MappingOutputsSet1, fig.height=11,fig.width=14}
+```{r MappingOutputsSet1, fig.height=8,fig.width=10}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
@@ -370,15 +380,13 @@ saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
 gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
 ```
 
-```{r PlotGFSet2Alt, fig.height=6,fig.width=8}
+```{r PlotGFSet2Alt, fig.height=5,fig.width=8}
 plot(gf, plot.type="Overall.Importance")
-plot(gf, plot.type="Split.Density")
-#plot(gf, plot.type="Cumulative.Importance")
-#plot(gf, plot.type="Cumulative.Importance",plot.args = list(impt.vars=c("bio14","bio5")))
-plot(gf, plot.type="Performance")
+# plot(gf, plot.type="Split.Density")
+# plot(gf, plot.type="Performance")
 ```
 
-```{r MappingOutputsSet2Alt, fig.height=11,fig.width=14}
+```{r MappingOutputsSet2Alt, fig.height=8,fig.width=10}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
@@ -449,15 +457,13 @@ saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
 gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
 ```
 
-```{r PlotGFSet2, fig.height=6,fig.width=8}
+```{r PlotGFSet2, fig.height=5,fig.width=8}
 plot(gf, plot.type="Overall.Importance")
-plot(gf, plot.type="Split.Density")
-#plot(gf, plot.type="Cumulative.Importance")
-#plot(gf, plot.type="Cumulative.Importance",plot.args = list(impt.vars=c("bio14","bio5")))
-plot(gf, plot.type="Performance")
+# plot(gf, plot.type="Split.Density")
+# plot(gf, plot.type="Performance")
 ```
 
-```{r MappingOutputsSet2, fig.height=11,fig.width=14}
+```{r MappingOutputsSet2, fig.height=8,fig.width=10}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
@@ -497,14 +503,17 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 
 ### Without altitude
 
-#### Current climate 
+#### Current climate (Fitting the models and projecting)
 
 ```{r VarSet5}
 select.var <- select.var5
 model.name <- "gfSet5"
 stack.name <- "StackSoilClimSet5"
-stack.name.fut <- "FutClimStackSoilClimSet5"
 ```
+
+> Fitting the models
+
+Here, we fit the model with all SNPs. But there are lots of warnings "The response has five or fewer unique values.  Are you sure you want to do regression?". This means that some alleles do not have enough unique values and the model estimation might not be robust.
 
 ```{r GFSet5, eval=F}
 subdata <- data[,c("prov",select.var)]
@@ -531,19 +540,55 @@ gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
 saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
 ```
 
-```{r LoadGFSet5, echo=F}
-gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
+In this model, we removed alleles with five or fewer unique values, to ensure a more robust regression. Like in Fitzpatrick and Keller: "For GF, we converted the SNP data into minor allele relative frequencies and removed any SNP that was polymorphic in fewer than five of the 31 populations to ensure robust regression".
+
+```{r GFSet5MAF, eval=F}
+subdata <- data[,c("prov",select.var)]
+colnames(subdata) <- c("prov",paste0(str_sub(c(select.var),0,-6)))
+
+df <- dplyr::inner_join(mem,subdata,by="prov")
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20]
+
+
+# read in data file with minor allele freqs & env/space variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+envGF[1:10,]
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# build individual SNP datasets
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+SNPs[1:10,1:10]
+
+# Fit gf models for reference SNPs 
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,"MAF.rds"))
 ```
 
-```{r PlotGFSet5, fig.height=6,fig.width=8}
+https://rpubs.com/javivi77/gradientforrestEMP
+
+```{r LoadGFSet5, echo=F}
+# Load model with all SNPs
+# gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
+
+# Load models in which SNPs that were polymorphic in fewer than five of the 34 populations were removed to ensure robust regression 
+gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,"MAF.rds"))
+```
+
+```{r PlotGFSet5, fig.height=4,fig.width=8}
 plot(gf, plot.type="Overall.Importance")
 plot(gf, plot.type="Split.Density")
-#plot(gf, plot.type="Cumulative.Importance")
-#plot(gf, plot.type="Cumulative.Importance",plot.args = list(impt.vars=c("bio14","bio5")))
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars=c("bio13","bio14"),
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
 plot(gf, plot.type="Performance")
 ```
 
-```{r MappingOutputsSet5, fig.height=11,fig.width=14}
+> Projecting across the species range
+
+```{r MappingOutputsSet5, fig.height=8,fig.width=10}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
@@ -573,14 +618,37 @@ rast2[mapCells] <- scalG
 rast3[mapCells] <- scalB
 ##stacks color rasters
 outRast <- stack(rast1, rast2, rast3)
-plotRGB(outRast, r = 1, g = 3, b = 2)
+plotRGB(outRast, r = 1, g = 2, b = 3)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-#### Future climate
+> Biplot of the genetic space
 
-```{r MappingOutputsSet5FutClim, fig.height=11,fig.width=14}
-stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name.fut,".grd"))
+```{r BiplotGeneticSpaceSet5, echo=F}
+nvs <- dim(pca$rotation)[1]
+vec <- names(gf$X)[5:10]
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 40
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+From here: https://gradientforest.r-forge.r-project.org/biodiversity-survey.pdf
+
+#### Future climate (2041-2060) - GCM BCC-CSM2-MR (SSP245)
+
+I don't know if I have to predict with the option `extrap=TRUE` or not. In their script, Fitzpatrick and Keller do not use this option (default). 
+
+```{r MappingOutputsSet5FutClim, fig.height=8,fig.width=10}
+stackall <- stack(paste0("../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP245/",stack.name,"_BCCCSM2MR.grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)
@@ -609,13 +677,33 @@ rast2[mapCells] <- scalG
 rast3[mapCells] <- scalB
 ##stacks color rasters
 outRast <- stack(rast1, rast2, rast3)
-plotRGB(outRast, r = 1, g = 3, b = 2)
+plotRGB(outRast, r = 1, g = 2, b = 3)
+# plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-#### Genomic offset
+> Biplot of the genetic space
 
-```{r GenomicOffsetSet5}
+```{r BiplotGeneticSpaceSet5FutClim, echo=F}
+nvs <- dim(pca$rotation)[1]
+vec <- names(gf$X)[5:10]
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 40
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+> Genomic offset
+
+```{r GenomicOffsetSet5,fig.height=6,fig.width=8}
 stackall <- stack(paste0("../../data/StacksEnvVars/CurStacksResWorldClim/",stack.name,"ResWorldClim.grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
@@ -632,25 +720,26 @@ genOffBS <- sqrt((projCurResWorldClim[,1]-predFut[,1])^2+(projCurResWorldClim[,2
                     +(projCurResWorldClim[,5]-predFut[,5])^2+(projCurResWorldClim[,6]-predFut[,6])^2)
 
 
-# assign values to raster - can be tricky if current/future climate
-# rasters are not identical in terms of # cells, extent, etc.
-values <- raster::extract(stackall, shp,cellnumbers=T)
-
 rast.go <- stackall[[1]]
 rast.go[rasValue$cell] <- genOffBS
 plot(rast.go)
 ```
 
 
-#### Future climate - All GCMs (SSP370)
+#### Future climate (2041-2060) - All GCMs (SSP370)
 
+Load the stacks (no need to have all the explanatory variables in the stack):
 
-```{r Set5BeforeSelectionFutClimAllGCMsCalculateGO}
-path="../../data/StacksEnvVars/FutClimStacks/2041to2060/"
+```{r LoadStackSet5BeforeSelectionFutClimAllGCMsCalculateGoSSP370}
+path="../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP370/"
 fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
 # Load the stacks in a list
 fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
+```
 
+Calculate the GO:
+
+```{r Set5BeforeSelectionFutClimAllGCMsCalculateGoSSP370}
 # Calculate the GO for each GCM
 genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
 names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
@@ -659,7 +748,7 @@ names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
 dfGOallGCMs <- as.data.frame(genOffallGCMs)
 ```
 
-```{r Set5BeforeSelectionFutClimAllGCMsPlots, fig.height=5,fig.width=6}
+```{r Set5BeforeSelectionFutClimAllGCMsPlotsSSP370, fig.height=3,fig.width=6}
 # Distribution of the genomic offset for each GCM
 dfGOallGCMs %>%  
   pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
@@ -698,6 +787,77 @@ dfGOallGCMs %>%
 # Keeping mean and SD for futher analyses
 DFtot <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanBS=mean,SdBS=sd)
 ```
+
+```{r PlotGOSet5BeforeSelectionFutClimAllGCMsSSP370,fig.height=6,fig.width=8}
+rast.go <- stackall[[1]]
+rast.go[rasValue$cell] <- dfGOallGCMs$mean
+plot(rast.go)
+```
+
+
+#### Future climate (2041-2060) - All GCMs (SSP585)
+
+
+```{r Set5BeforeSelectionFutClimAllGCMsCalculateGoSSP585}
+path="../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP585/"
+fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
+# Load the stacks in a list
+fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
+
+# Calculate the GO for each GCM
+genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
+
+# convert to DF 
+dfGOallGCMs <- as.data.frame(genOffallGCMs)
+```
+
+```{r Set5BeforeSelectionFutClimAllGCMsPlotsSSP585, fig.height=3,fig.width=6}
+# Distribution of the genomic offset for each GCM
+dfGOallGCMs %>%  
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+
+dfGOallGCMs$mean <- apply(dfGOallGCMs,1,mean)
+dfGOallGCMs$sd <- apply(dfGOallGCMs,1,sd)
+dfGOallGCMs$sdSup <- dfGOallGCMs$mean + dfGOallGCMs$sd
+dfGOallGCMs$sdInf <- dfGOallGCMs$mean - dfGOallGCMs$sd
+dfGOallGCMs$seSup <- dfGOallGCMs$mean + dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+dfGOallGCMs$seInf <- dfGOallGCMs$mean - dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+
+
+# Distribution of mean GO and its SE
+dfGOallGCMs %>%  
+  dplyr::select(mean,seSup,seInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Distribution of mean GO and SD Supp and Inf
+dfGOallGCMs %>%  
+  dplyr::select(mean,sdSup,sdInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Keeping mean and SD for futher analyses
+DFtotssp585 <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanBS=mean,SdBS=sd)
+```
+
+```{r PlotGOSet5BeforeSelectionFutClimAllGCMsSSP585,fig.height=6,fig.width=8}
+rast.go <- stackall[[1]]
+rast.go[rasValue$cell] <- dfGOallGCMs$mean
+plot(rast.go)
+```
+
 
 # AFTER SELECTION in Madrid and Caceres
 
@@ -761,6 +921,12 @@ saveRDS(geno,file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesAf
 geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesAfterSelectionCacMad.rds")
 ```
 
+```{r RmMinorAlleleFrequenciesCacMad}
+vec <- apply(geno[,-1],2,function(x) length(unique(x)))
+vecsup <- vec[vec>5]
+snps <- names(vecsup)
+genoMAF <- geno %>% dplyr::select(contains(c("prov",snps)))
+```
 
 ## Set 5
 
@@ -772,7 +938,6 @@ geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencie
 select.var <- select.var5
 model.name <- "gfSet5AfterSelectionCacMad"
 stack.name <- "StackSoilClimSet5"
-stack.name.fut <- "FutClimStackSoilClimSet5"
 ```
 
 ```{r GFSet5AfterSelectionCacMad, eval=F}
@@ -800,22 +965,50 @@ gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
 saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
 ```
 
-Lots of warnings: "The response has five or fewer unique values.  Are you sure you want to do regression?"
-Some info here: https://nickfountainjones.wordpress.com/tag/r/
+```{r GFSet5AfterSelectionCacMadMAF, eval=F}
+subdata <- data[,c("prov",select.var)]
+colnames(subdata) <- c("prov",paste0(str_sub(c(select.var),0,-6)))
+
+df <- dplyr::inner_join(mem,subdata,by="prov")
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20]
+
+
+# read in data file with minor allele freqs & env/space variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+envGF[1:10,]
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# build individual SNP datasets
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+SNPs[1:10,1:10]
+
+# Fit gf models for reference SNPs 
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,"MAF.rds"))
+```
+
 
 ```{r LoadGFSet5AfterSelectionCacMad, echo=F}
-gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
+# Load model with all SNPs
+# gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
+
+# Load models in which SNPs that were polymorphic in fewer than five of the 34 populations were removed to ensure robust regression 
+gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,"MAF.rds"))
 ```
 
-```{r PlotGFSet5AfterSelectionCacMad, fig.height=6,fig.width=8}
+```{r PlotGFSet5AfterSelectionCacMad, fig.height=5,fig.width=8}
 plot(gf, plot.type="Overall.Importance")
-plot(gf, plot.type="Split.Density")
-#plot(gf, plot.type="Cumulative.Importance")
-#plot(gf, plot.type="Cumulative.Importance",plot.args = list(impt.vars=c("bio14","bio5")))
-plot(gf, plot.type="Performance")
+#plot(gf, plot.type="Split.Density")
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars=c("bio13","bio14"),
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+#plot(gf, plot.type="Performance")
 ```
 
-```{r MappingOutputsSet5AfterSelectionCacMad, fig.height=11,fig.width=14}
+```{r MappingOutputsSet5AfterSelectionCacMad, fig.height=8,fig.width=10}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
@@ -849,10 +1042,10 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-#### Future climate (SSP245)
+#### Future climate (2041-2060) - GCM BCC-CSM2-MR (SSP245)
 
-```{r MappingOutputsSet5FutClimAfterSelectionCacMad, fig.height=11,fig.width=14}
-stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name.fut,".grd"))
+```{r MappingOutputsSet5FutClimAfterSelectionCacMad, fig.height=8,fig.width=10}
+stackall <- stack(paste0("../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP245/",stack.name,"_BCCCSM2MR.grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)
@@ -885,9 +1078,9 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-#### Genomic offset
+> Genomic offset
 
-```{r GenomicOffsetSet5AfterSelectionCacMad}
+```{r GenomicOffsetSet5AfterSelectionCacMad,fig.height=6,fig.width=8}
 stackall <- stack(paste0("../../data/StacksEnvVars/CurStacksResWorldClim/",stack.name,"ResWorldClim.grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
@@ -914,11 +1107,11 @@ plot(rast.go)
 ```
 
 
-#### Future climate - All GCMs (SSP370)
+#### Future climate (2041-2060) - All GCMs (SSP370)
 
 
-```{r Set5AfterSelectionCacMadFutClimAllGCMsCalculateGO}
-path="../../data/StacksEnvVars/FutClimStacks/2041to2060/"
+```{r Set5AfterSelectionCacMadFutClimAllGCMsCalculateGoSSP370}
+path="../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP370/"
 fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
 # Load the stacks in a list
 fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
@@ -931,7 +1124,7 @@ names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
 dfGOallGCMs <- as.data.frame(genOffallGCMs)
 ```
 
-```{r Set5AfterSelectionCacMadFutClimAllGCMsPlots, fig.height=5,fig.width=6}
+```{r Set5AfterSelectionCacMadFutClimAllGCMsPlotsSSP370, fig.height=3,fig.width=6}
 # Distribution of the genomic offset for each GCM
 dfGOallGCMs %>%  
   pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
@@ -970,6 +1163,78 @@ dfGOallGCMs %>%
 # Keeping mean and SD for futher analyses
 dfGOallGCMs <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanASmadcac=mean,SdASmadcac=sd)
 DFtot <- bind_cols(DFtot,dfGOallGCMs)
+```
+
+
+```{r PlotGOSet5AfterSelectionCacMadFutClimAllGCMsSSP370,fig.height=6,fig.width=8}
+rast.go <- stackall[[1]]
+rast.go[rasValue$cell] <- dfGOallGCMs$MeanASmadcac
+plot(rast.go)
+```
+
+
+#### Future climate (2041-2060) - All GCMs (SSP585)
+
+
+```{r Set5AfterSelectionCacMadFutClimAllGCMsCalculateGoSSP585}
+path="../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP585/"
+fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
+# Load the stacks in a list
+fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
+
+# Calculate the GO for each GCM
+genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
+
+# convert to DF 
+dfGOallGCMs <- as.data.frame(genOffallGCMs)
+```
+
+```{r Set5AfterSelectionCacMadFutClimAllGCMsPlotsSSP585, fig.height=3,fig.width=6}
+# Distribution of the genomic offset for each GCM
+dfGOallGCMs %>%  
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+
+dfGOallGCMs$mean <- apply(dfGOallGCMs,1,mean)
+dfGOallGCMs$sd <- apply(dfGOallGCMs,1,sd)
+dfGOallGCMs$sdSup <- dfGOallGCMs$mean + dfGOallGCMs$sd
+dfGOallGCMs$sdInf <- dfGOallGCMs$mean - dfGOallGCMs$sd
+dfGOallGCMs$seSup <- dfGOallGCMs$mean + dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+dfGOallGCMs$seInf <- dfGOallGCMs$mean - dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+
+
+# Distribution of mean GO and its SE
+dfGOallGCMs %>%  
+  dplyr::select(mean,seSup,seInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Distribution of mean GO and SD Supp and Inf
+dfGOallGCMs %>%  
+  dplyr::select(mean,sdSup,sdInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Keeping mean and SD for futher analyses
+dfGOallGCMs <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanASmadcac=mean,SdASmadcac=sd)
+DFtotssp585 <- bind_cols(DFtotssp585,dfGOallGCMs)
+```
+
+```{r PlotGOSet5AfterSelectionCacMadFutClimAllGCMsSSP585,fig.height=6,fig.width=8}
+rast.go <- stackall[[1]]
+rast.go[rasValue$cell] <- dfGOallGCMs$MeanASmadcac
+plot(rast.go)
 ```
 
 
@@ -1033,6 +1298,12 @@ saveRDS(geno,file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesAf
 geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesAfterSelectionCacOnly.rds")
 ```
 
+```{r RmMinorAlleleFrequenciesCacOnly}
+vec <- apply(geno[,-1],2,function(x) length(unique(x)))
+vecsup <- vec[vec>5]
+snps <- names(vecsup)
+genoMAF <- geno %>% dplyr::select(contains(c("prov",snps)))
+```
 
 ## Set 5
 
@@ -1044,7 +1315,6 @@ geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencie
 select.var <- select.var5
 model.name <- "gfSet5AfterSelectionCacOnly"
 stack.name <- "StackSoilClimSet5"
-stack.name.fut <- "FutClimStackSoilClimSet5"
 ```
 
 ```{r GFSet5AfterSelectionCacOnly, eval=F}
@@ -1072,24 +1342,54 @@ gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
 saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,".rds"))
 ```
 
+```{r GFSet5AfterSelectionCacOnlyMAF, eval=F}
+subdata <- data[,c("prov",select.var)]
+colnames(subdata) <- c("prov",paste0(str_sub(c(select.var),0,-6)))
+
+df <- dplyr::inner_join(mem,subdata,by="prov")
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20]
+
+
+# read in data file with minor allele freqs & env/space variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+envGF[1:10,]
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# build individual SNP datasets
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+SNPs[1:10,1:10]
+
+# Fit gf models for reference SNPs 
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/",model.name,"MAF.rds"))
+```
+
+```{r LoadGFSet5AfterSelectionCacOnly, echo=F}
+# Load model with all SNPs
+# gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
+
+# Load models in which SNPs that were polymorphic in fewer than five of the 34 populations were removed to ensure robust regression 
+gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,"MAF.rds"))
+```
 
 
 Lots of warnings: "The response has five or fewer unique values.  Are you sure you want to do regression?"
 Some info here: https://nickfountainjones.wordpress.com/tag/r/
 
-```{r LoadGFSet5AfterSelectionCacOnly, echo=F}
-gf <- readRDS(file=paste0("../../outputs/GF/models/",model.name,".rds"))
-```
 
-```{r PlotGFSet5AfterSelectionCacOnly, fig.height=6,fig.width=8}
+```{r PlotGFSet5AfterSelectionCacOnly, fig.height=5,fig.width=8}
 plot(gf, plot.type="Overall.Importance")
-plot(gf, plot.type="Split.Density")
-#plot(gf, plot.type="Cumulative.Importance")
-#plot(gf, plot.type="Cumulative.Importance",plot.args = list(impt.vars=c("bio14","bio5")))
-plot(gf, plot.type="Performance")
+#plot(gf, plot.type="Split.Density")
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars=c("bio13","bio14"),
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+#plot(gf, plot.type="Performance")
 ```
 
-```{r MappingOutputsSet5AfterSelectionCacOnly, fig.height=11,fig.width=14}
+```{r MappingOutputsSet5AfterSelectionCacOnly, fig.height=8,fig.width=10}
 stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
@@ -1123,10 +1423,10 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-#### Future climate
+#### Future climate (2041-2060) - GCM BCC-CSM2-MR (SSP245)
 
-```{r MappingOutputsSet5FutClimAfterSelectionCacOnly, fig.height=11,fig.width=14}
-stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name.fut,".grd"))
+```{r MappingOutputsSet5FutClimAfterSelectionCacOnly, fig.height=8,fig.width=10}
+stackall <- stack(paste0("../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP245/",stack.name,"_BCCCSM2MR.grd"))
 
 rasValue <- raster::extract(stackall, shp,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)
@@ -1159,7 +1459,7 @@ plotRGB(outRast, r = 1, g = 3, b = 2)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
-#### Genomic offset
+> Genomic offset
 
 ```{r GenomicOffsetSet5AfterSelectionCacOnly}
 stackall <- stack(paste0("../../data/StacksEnvVars/CurStacksResWorldClim/",stack.name,"ResWorldClim.grd"))
@@ -1187,7 +1487,7 @@ rast.go[rasValue$cell] <- genOffAScac
 plot(rast.go)
 ```
   
-```{r ComparingBeforeAndAfterSelectionSet5CacOnly,fig.width=9}
+```{r ComparingBeforeAndAfterSelectionSet5CacOnly,fig.height=6,fig.width=8}
 GO <- data.frame(BS=genOffBS,AS=genOffAScacmad, AScac=genOffAScac)
 GO <- GO %>%  pivot_longer(cols=everything(),names_to="subset",values_to="go")
 ggplot(GO, aes(x=go,color=subset)) + 
@@ -1208,11 +1508,11 @@ ggplot(GO, aes(x=subset, y=go, fill=subset)) +
 ```
 
 
-#### Future climate - All GCMs (SSP370)
+#### Future climate (2041-2060) - All GCMs (SSP370)
 
 
-```{r Set5AfterSelectionCacOnlyFutClimAllGCMsCalculateGO}
-path="../../data/StacksEnvVars/FutClimStacks/2041to2060/"
+```{r Set5AfterSelectionCacOnlyFutClimAllGCMsCalculateGoSSP370}
+path="../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP370/"
 fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
 # Load the stacks in a list
 fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
@@ -1225,7 +1525,7 @@ names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
 dfGOallGCMs <- as.data.frame(genOffallGCMs)
 ```
 
-```{r Set5AfterSelectionCacOnlyFutClimAllGCMsPlots, fig.height=5,fig.width=10}
+```{r Set5AfterSelectionCacOnlyFutClimAllGCMsPlotsSSP370, fig.height=3,fig.width=6}
 # Distribution of the genomic offset for each GCM
 dfGOallGCMs %>%  
   pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
@@ -1291,5 +1591,202 @@ DFtot %>%
 
 To show se instead of sd in the barplots: https://stackoverflow.com/questions/25999677/how-to-plot-mean-and-standard-error-in-boxplot-in-r
 
+
+```{r PlotGOSet5AfterSelectionCacOnlyFutClimAllGCMsSSP370,fig.height=6,fig.width=8}
+rast.go <- stackall[[1]]
+rast.go[rasValue$cell] <- dfGOallGCMs$MeanAScac
+plot(rast.go)
+```
+
+
+
+#### Future climate (2041-2060) - All GCMs (SSP585)
+
+
+```{r Set5AfterSelectionCacOnlyFutClimAllGCMsCalculateGoSSP585}
+path="../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP585/"
+fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
+# Load the stacks in a list
+fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
+
+# Calculate the GO for each GCM
+genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
+
+# convert to DF 
+dfGOallGCMs <- as.data.frame(genOffallGCMs)
+```
+
+```{r Set5AfterSelectionCacOnlyFutClimAllGCMsPlotsSSP585, fig.height=3,fig.width=6}
+# Distribution of the genomic offset for each GCM
+dfGOallGCMs %>%  
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+
+dfGOallGCMs$mean <- apply(dfGOallGCMs,1,mean)
+dfGOallGCMs$sd <- apply(dfGOallGCMs,1,sd)
+dfGOallGCMs$sdSup <- dfGOallGCMs$mean + dfGOallGCMs$sd
+dfGOallGCMs$sdInf <- dfGOallGCMs$mean - dfGOallGCMs$sd
+dfGOallGCMs$seSup <- dfGOallGCMs$mean + dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+dfGOallGCMs$seInf <- dfGOallGCMs$mean - dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+
+
+# Distribution of mean GO and its SE
+dfGOallGCMs %>%  
+  dplyr::select(mean,seSup,seInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Distribution of mean GO and SD Supp and Inf
+dfGOallGCMs %>%  
+  dplyr::select(mean,sdSup,sdInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Comparing with BeforeSelection and AfterSelectionCacMad
+dfGOallGCMs <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanAScac=mean,SdAScac=sd)
+DFtotssp585 <- bind_cols(DFtotssp585,dfGOallGCMs)
+
+DFtotssp585 %>% 
+  pivot_longer(cols=contains("Mean"),names_to="subset",values_to="go") %>% 
+  ggplot(aes(x=go,color=subset)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")  +
+    scale_color_discrete(name = "Subset of\n genotypes", labels = c("After selection in Caceres",
+                                                                    "After selection in Madrid and Caceres",
+                                                                    "Before Selection"))
+DFtotssp585 %>% 
+  pivot_longer(cols=contains("Mean"),names_to="subset",values_to="go") %>% 
+  ggplot(aes(x=subset, y=go, fill=subset)) + 
+    geom_boxplot(alpha=0.6) + 
+    theme_bw() +
+    scale_fill_discrete(name = "Subset of\n genotypes",
+                      labels = c("After selection in Caceres",
+                                 "After selection in Madrid and Caceres",
+                                 "Before Selection")) +
+    ylab("Genomic offset") +
+    theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+
+```{r PlotGOSet5AfterSelectionCacOnlyFutClimAllGCMsSSP585,fig.height=6,fig.width=8}
+rast.go <- stackall[[1]]
+rast.go[rasValue$cell] <- dfGOallGCMs$MeanAScac
+plot(rast.go)
+```
+
+
+# Map diff b/w turnover in genetic composition BS and AS
+
+[Fitzpatrick and Keller (2014)](https://onlinelibrary.wiley.com/doi/full/10.1111/ele.12376) :"To estimate the congruence (or lack thereof) between the mapped genetic patterns for reference SNPs and the four candidate SNP data sets, we performed a Procrustes superimposition on the resulting PCA ordinations, where the matrices were rotated to minimise the sum of square of the distances between the sites in genetic space (Peres‐Neto & Jackson 2001). The Procrustes residuals, which in this case measure the absolute distance between sites in genetic space and the rotated ordination space, were mapped to provide a location‐specific measure of the difference in genetic composition patterns between reference and the four sets of candidate SNPs. For all visualisations, we constrained predictions to within the geographic range of balsam poplar as defined by Little (1971)."
+
+**So here we compare the genetic patterns before selection (BS), after selection in Madrid and Caceres (ASMadCac) and after selection in Caceres (ASCacOnly).**
+
+
+```{r MapGeneticDiffCurrentClimBSandAS}
+stack.name <- "StackSoilClimSet5"
+
+# Model fitted on frequencies before selection
+gfBS <- readRDS(file=paste0("../../outputs/GF/models/gfSet5MAF.rds"))
+
+# Model fitted on frequencies after selection in Madrid and Caceres
+gfASCacMad <- readRDS(file=paste0("../../outputs/GF/models/gfSet5AfterSelectionCacMad.rds"))
+
+# Model fitted on frequencies after selection in Caceres
+gfASCacOnly <- readRDS(file=paste0("../../outputs/GF/models/gfSet5AfterSelectionCacOnly.rds"))
+
+stackall <- stack(paste0("../../data/StacksEnvVars/",stack.name,".grd"))
+
+rasValue <- raster::extract(stackall, shp,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+  
+predFutBS <- predict(gfBS, rasValue[,-1])
+predFutASCacMad <- predict(gfASCacMad, rasValue[,-1])
+predFutASCacOnly <- predict(gfASCacOnly, rasValue[,-1])
+
+PCA.BS <- prcomp(predFutBS, center=TRUE, scale.=FALSE)
+PCA.ASCacMad <- prcomp(predFutASCacMad, center=TRUE, scale.=FALSE)
+PCA.ASCacOnly <- prcomp(predFutASCacOnly, center=TRUE, scale.=FALSE)
+
+resid.diffProcrust.BS.ASCacMad <- residuals(procrustes(PCA.BS, PCA.ASCacMad, scale=TRUE, symmetrical=FALSE))
+resid.diffProcrust.BS.ASCacOnly <- residuals(procrustes(PCA.BS, PCA.ASCacOnly, scale=TRUE, symmetrical=FALSE))
+resid.diffProcrust.ASCacMad.ASCacOnly <- residuals(procrustes(PCA.ASCacMad, PCA.ASCacOnly, scale=TRUE, symmetrical=FALSE))
+
+rast.Procrust.BS.ASCacMad <- stackall[[1]]
+rast.Procrust.BS.ASCacOnly <- stackall[[1]]
+rast.Procrust.ASCacMad.ASCacOnly <- stackall[[1]]
+
+rast.Procrust.BS.ASCacMad[rasValue$cell] <- resid.diffProcrust.BS.ASCacMad
+rast.Procrust.BS.ASCacOnly[rasValue$cell] <- resid.diffProcrust.BS.ASCacOnly
+rast.Procrust.ASCacMad.ASCacOnly[rasValue$cell] <- resid.diffProcrust.ASCacMad.ASCacOnly
+```
+
+To plot the **difference between turnover in genetic composition** before and after the selection events based on **Procrustes residuals**, the distances are **scaled to the maximum distance** found between the three comparisons (BS vs ASMadCac, BS vs ASMadOnly, ASMadCac vs ASMadOnly). In [Fitzpatrick & Keller (2014)](https://onlinelibrary.wiley.com/doi/full/10.1111/ele.12376): "The (c) difference between turnover in genetic composition of reference SNPs and GI5 is based on Procrustes residuals, with distances scaled to the maximum distance found in any comparison between reference and the four candidate SNP data sets from both GF and GDM".
+ 
+```{r MapDiffBSandAS, fig.height=8,fig.width=10, eval=F,echo=F}
+# If we want to plot the non standardized procrutes residuals
+plot(rast.Procrust.BS.ASCacMad,box = FALSE,
+     axes = FALSE,
+     alpha=0.8,
+      col=colorRampPalette(c("blue","yellow","red"))(255),
+     zlim=c(0,0.005))
+
+plot(rast.Procrust.BS.ASCacOnly,box = FALSE,
+     axes = FALSE,
+     alpha=0.8,
+      col=colorRampPalette(c("blue","yellow","red"))(255),
+     zlim=c(0,0.005))
+
+plot(rast.Procrust.ASCacMad.ASCacOnly,box = FALSE,
+     axes = FALSE,
+     alpha=0.8,
+      col=colorRampPalette(c("blue","yellow","red"))(255),
+     zlim=c(0,0.005))
+```
+
+```{r MapDiffBSandASStandardized, fig.height=8,fig.width=10}
+max.resid <- max(max(resid.diffProcrust.BS.ASCacMad), 
+    max(resid.diffProcrust.BS.ASCacOnly),
+    max(resid.diffProcrust.ASCacMad.ASCacOnly))
+max.resid 
+
+rast.Procrust.BS.ASCacMad[rasValue$cell] <- resid.diffProcrust.BS.ASCacMad / max.resid
+rast.Procrust.BS.ASCacOnly[rasValue$cell] <- resid.diffProcrust.BS.ASCacOnly / max.resid
+rast.Procrust.ASCacMad.ASCacOnly[rasValue$cell] <- resid.diffProcrust.ASCacMad.ASCacOnly / max.resid
+
+plot(rast.Procrust.BS.ASCacMad,box = FALSE,
+     axes = FALSE,
+     alpha=0.8,
+     zlim=c(0,1),
+     main="Before selection VS After selection in Madrid and Caceres",
+     col=colorRampPalette(c("blue","yellow","red"))(255))
+
+plot(rast.Procrust.BS.ASCacOnly,box = FALSE,
+     axes = FALSE,
+     alpha=0.8,
+     zlim=c(0,1),
+     main="Before selection VS After selection in Caceres",
+     col=colorRampPalette(c("blue","yellow","red"))(255))
+
+plot(rast.Procrust.ASCacMad.ASCacOnly,box = FALSE,
+     axes = FALSE,
+     alpha=0.8,
+     zlim=c(0,1),
+     col=colorRampPalette(c("blue","yellow","red"))(255),
+     main="After selection in Madrid and Caceres VS After selection in Caceres")
+```
 
 `r knitr::opts_chunk$set(eval = F)`
