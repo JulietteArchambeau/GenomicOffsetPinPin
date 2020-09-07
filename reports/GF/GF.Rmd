@@ -48,6 +48,7 @@ pre[class] {
 knitr::opts_chunk$set(cache=T)
 options(width = 300)
 library(knitr)
+library(plyr)
 library(dplyr)
 library(tidyverse)
 library(raster)
@@ -66,7 +67,7 @@ https://www.biorxiv.org/content/10.1101/871251v1.full
 - warning when running the models: "Warning in randomForest.default(m, y, ...): The response has five or fewer unique values. Are you sure you want to do regression?" In `?gradientForest`, " If the species are numeric variables, a regression forest is calculated. If the species are factor variables, a classification forest is calculated."
 
 ```{r Functions}
-PredictAcrossRange <- function(x){
+GOAcrossRange <- function(x){
   
   rasValue <- raster::extract(x, shp,cellnumbers=T)
   rasValue <- as.data.frame(rasValue)
@@ -79,6 +80,17 @@ PredictAcrossRange <- function(x){
   return(sqrt((projCurResWorldClim[,1]-predFut[,1])^2+(projCurResWorldClim[,2]-predFut[,2])^2
                     +(projCurResWorldClim[,3]-predFut[,3])^2+(projCurResWorldClim[,4]-predFut[,4])^2
                     +(projCurResWorldClim[,5]-predFut[,5])^2+(projCurResWorldClim[,6]-predFut[,6])^2))
+}
+
+VarImptanceAcrossRange <- function(x){
+  
+  rasValue <- raster::extract(x, shp,cellnumbers=T)
+  rasValue <- as.data.frame(rasValue)
+  rasValue <- na.omit(rasValue)
+  
+  # transform env using gf models, see ?predict.gradientForest
+  return(predict(gf, rasValue[,-1]))
+  
 }
 ```
 
@@ -170,6 +182,8 @@ geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencie
 vec <- apply(geno[,-1],2,function(x) length(unique(x)))
 vecsup <- vec[vec>5]
 snps <- names(vecsup)
+length(vecsup) # Number of SNPs polymorphic in > 5 populations
+ncol(geno[,-1]) - length(vecsup) # Number of SNPs polymorphic in less than or equal to 5 populations
 genoMAF <- geno %>% dplyr::select(contains(c("prov",snps)))
 ```
 
@@ -584,6 +598,9 @@ plot(gf, plot.type="Cumulative.Importance",
      imp.vars=c("bio13","bio14"),
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 plot(gf, plot.type="Performance")
+plot(gf, plot.type = "P", show.names = T, horizontal = F,cex.axis = 1, cex.labels = 0.6, line = 2.5)
+mean(gf$result)
+sd(gf$result)
 ```
 
 > Projecting across the species range
@@ -633,12 +650,64 @@ scal <- 40
 xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
 yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
-points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
 arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
 jit <- 0.0015
 text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
      labels = vec)
+
+
+# Show the provenances
+PredsProvs <- predict(gf)
+PCprovs <- predict(pca, PredsProvs)
+points(PCprovs[, 1:2])
+
+# Show the alleles
+SpsWtd <- sweep(gf$Y, 2, apply(gf$Y, 2, min),  "-")
+SpsWtdPCs <- (t(SpsWtd) %*% (PCprovs[, 1:2]))/colSums(SpsWtd)
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 3, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(SpsWtdPCs, pch = ".",cex=3,col="black") # col = alpha("black", 0.4)
+
+# Show some alleles
+snp <- "SNP_0008"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+
+snp <- "SNP_0109"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x10")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*10)
+
+
+snp <- "SNP_6088"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
 ```
 
 From here: https://gradientforest.r-forge.r-project.org/biodiversity-survey.pdf
@@ -693,12 +762,64 @@ scal <- 40
 xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
 yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
-points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
 arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
 jit <- 0.0015
 text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
      labels = vec)
+
+
+# Show the provenances
+PredsProvs <- predict(gf)
+PCprovs <- predict(pca, PredsProvs)
+points(PCprovs[, 1:2])
+
+# Show the alleles
+SpsWtd <- sweep(gf$Y, 2, apply(gf$Y, 2, min),  "-")
+SpsWtdPCs <- (t(SpsWtd) %*% (PCprovs[, 1:2]))/colSums(SpsWtd)
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 3, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(SpsWtdPCs, pch = ".",cex=3,col="black") # col = alpha("black", 0.4)
+
+# Show some alleles
+snp <- "SNP_0008"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+
+snp <- "SNP_0109"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x10")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*10)
+
+
+snp <- "SNP_6088"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
 ```
 
 > Genomic offset
@@ -737,11 +858,116 @@ fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
 fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
 ```
 
+
+Predictions across the range:
+
+```{r Set5BeforeSelectionFutClimAllGCMsPredictionsAcrossRangeSSP370, echo=F}
+# Calculate the GO for each GCM
+genOffallGCMs <- lapply(fut.clim.stacks, VarImptanceAcrossRange)
+names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
+
+genOffallGCMs <- aaply(laply(genOffallGCMs, as.matrix), c(2, 3), mean)
+
+# convert to DF 
+dfGOallGCMs <- as.data.frame(genOffallGCMs)
+
+# ppcatoraster by hand
+pca <- prcomp(predFut, center=TRUE, scale.=FALSE)
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackall[[1]]
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plotRGB(outRast, r = 1, g = 2, b = 3)
+# plotRGB(outRast, r = 1, g = 3, b = 2)
+# plotRGB(outRast, r = 3, g = 1, b = 2)
+
+nvs <- dim(pca$rotation)[1]
+vec <- names(gf$X)[5:10]
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 40
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+
+
+# Show the provenances
+PredsProvs <- predict(gf)
+PCprovs <- predict(pca, PredsProvs)
+points(PCprovs[, 1:2])
+
+# Show the alleles
+SpsWtd <- sweep(gf$Y, 2, apply(gf$Y, 2, min),  "-")
+SpsWtdPCs <- (t(SpsWtd) %*% (PCprovs[, 1:2]))/colSums(SpsWtd)
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 3, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(SpsWtdPCs, pch = ".",cex=3,col="black") # col = alpha("black", 0.4)
+
+# Show some alleles
+snp <- "SNP_0008"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+
+snp <- "SNP_0109"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x10")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*10)
+
+
+snp <- "SNP_6088"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+```
+
 Calculate the GO:
 
 ```{r Set5BeforeSelectionFutClimAllGCMsCalculateGoSSP370}
 # Calculate the GO for each GCM
-genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+genOffallGCMs <- lapply(fut.clim.stacks, GOAcrossRange)
 names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
 
 # convert to DF 
@@ -791,7 +1017,11 @@ DFtot <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanBS=mean,Sd
 ```{r PlotGOSet5BeforeSelectionFutClimAllGCMsSSP370,fig.height=6,fig.width=8}
 rast.go <- stackall[[1]]
 rast.go[rasValue$cell] <- dfGOallGCMs$mean
-plot(rast.go)
+plot(rast.go,box = FALSE,
+     axes = FALSE,
+     alpha=0.8,
+      col=colorRampPalette(c("blue","yellow","red"))(255),
+     zlim=c(0,0.1))
 ```
 
 
@@ -805,7 +1035,7 @@ fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
 fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
 
 # Calculate the GO for each GCM
-genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+genOffallGCMs <- lapply(fut.clim.stacks, GOAcrossRange)
 names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
 
 # convert to DF 
@@ -865,23 +1095,10 @@ Here we remove the genotypes for which no individual has survived neither in Mad
 
 ## Loading new genotypic frequencies
 
-> Extracting the genotype names to be selected 
+> Extracting the genotype names to be kept
 
 ```{r ExtractGenotypeNamesCacMad}
-temp.data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
-
-# Removing genotypes for which there is no genomic data
-temp.data <- temp.data[!(is.na(temp.data$Q1)),]
-
-# Keep only data from Caceres and Madrid (the dry sites) 
-temp.data <- temp.data[temp.data$site=="caceres"|temp.data$site=="madrid",]
-
-# Keep only survivors
-temp.data <- temp.data[temp.data$survival==1,]
-
-# Vectors of genotypes for which at least one indivdual survive to drought
-geno.names.sub <- unique(temp.data$clon)
-rm(temp.data)
+geno.names.sub <- readRDS(file="../../data/PreparedDFforGDMandGF/GenotypesToBeKeptAfterSelection/ListASCacMad.rds")
 
 # How many genotypes?
 length(geno.names.sub)
@@ -925,6 +1142,8 @@ geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencie
 vec <- apply(geno[,-1],2,function(x) length(unique(x)))
 vecsup <- vec[vec>5]
 snps <- names(vecsup)
+length(vecsup) # Number of SNPs polymorphic in > 5 populations
+ncol(geno[,-1]) - length(vecsup) # Number of SNPs polymorphic in less than or equal to 5 populations
 genoMAF <- geno %>% dplyr::select(contains(c("prov",snps)))
 ```
 
@@ -1117,7 +1336,7 @@ fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
 fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
 
 # Calculate the GO for each GCM
-genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+genOffallGCMs <- lapply(fut.clim.stacks, GOAcrossRange)
 names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
 
 # convert to DF 
@@ -1183,7 +1402,7 @@ fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
 fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
 
 # Calculate the GO for each GCM
-genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+genOffallGCMs <- lapply(fut.clim.stacks, GOAcrossRange)
 names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
 
 # convert to DF 
@@ -1245,24 +1464,13 @@ plot(rast.go)
 > Extracting the genotype names to be selected 
 
 ```{r ExtractGenotypeNamesCacOnly}
-temp.data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
-
-# Removing genotypes for which there is no genomic data
-temp.data <- temp.data[!(is.na(temp.data$Q1)),]
-
-# Keep only data from Caceres and Madrid (the dry sites) 
-temp.data <- temp.data[temp.data$site=="caceres",]
-
-# Keep only survivors
-temp.data <- temp.data[temp.data$survival==1,]
-
-# Vectors of genotypes for which at least one indivdual survive to drought
-geno.names.sub <- unique(temp.data$clon)
-rm(temp.data)
+geno.names.sub <- readRDS(file="../../data/PreparedDFforGDMandGF/GenotypesToBeKeptAfterSelection/ListASCacOnly.rds")
 
 # How many genotypes?
 length(geno.names.sub)
 ```
+
+
 
 
 > Load and prepare new genomic data
@@ -1302,6 +1510,8 @@ geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencie
 vec <- apply(geno[,-1],2,function(x) length(unique(x)))
 vecsup <- vec[vec>5]
 snps <- names(vecsup)
+length(vecsup) # Number of SNPs polymorphic in > 5 populations
+ncol(geno[,-1]) - length(vecsup) # Number of SNPs polymorphic in less than or equal to 5 populations
 genoMAF <- geno %>% dplyr::select(contains(c("prov",snps)))
 ```
 
@@ -1518,7 +1728,7 @@ fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
 fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
 
 # Calculate the GO for each GCM
-genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+genOffallGCMs <- lapply(fut.clim.stacks, GOAcrossRange)
 names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
 
 # convert to DF 
@@ -1610,7 +1820,7 @@ fut.clim.stacks.names <- list.files(path=path,pattern="grd$")
 fut.clim.stacks <- lapply(fut.clim.stacks.names, function(t) stack(paste0(path,t)))
 
 # Calculate the GO for each GCM
-genOffallGCMs <- lapply(fut.clim.stacks, PredictAcrossRange)
+genOffallGCMs <- lapply(fut.clim.stacks, GOAcrossRange)
 names(genOffallGCMs) <- str_sub(fut.clim.stacks.names,19,-5)
 
 # convert to DF 
@@ -1662,19 +1872,19 @@ DFtotssp585 %>%
   ggplot(aes(x=go,color=subset)) + 
     geom_density(size=1.5) +
     theme_bw() + 
-    xlab("Genomic offset")  +
-    scale_color_discrete(name = "Subset of\n genotypes", labels = c("After selection in Caceres",
-                                                                    "After selection in Madrid and Caceres",
-                                                                    "Before Selection"))
+    xlab("Genomic offset")#  +
+    # scale_color_discrete(name = "Subset of\n genotypes", labels = c("After selection in Caceres",
+    #                                                                 "After selection in Madrid and Caceres",
+    #                                                                 "Before Selection"))
 DFtotssp585 %>% 
   pivot_longer(cols=contains("Mean"),names_to="subset",values_to="go") %>% 
   ggplot(aes(x=subset, y=go, fill=subset)) + 
     geom_boxplot(alpha=0.6) + 
-    theme_bw() +
-    scale_fill_discrete(name = "Subset of\n genotypes",
-                      labels = c("After selection in Caceres",
-                                 "After selection in Madrid and Caceres",
-                                 "Before Selection")) +
+    theme_bw() # +
+    # scale_fill_discrete(name = "Subset of\n genotypes",
+    #                   labels = c("After selection in Caceres",
+    #                              "After selection in Madrid and Caceres",
+    #                              "Before Selection")) +
     ylab("Genomic offset") +
     theme(axis.title.x=element_blank(),
         axis.text.x=element_blank(),
@@ -1787,6 +1997,68 @@ plot(rast.Procrust.ASCacMad.ASCacOnly,box = FALSE,
      zlim=c(0,1),
      col=colorRampPalette(c("blue","yellow","red"))(255),
      main="After selection in Madrid and Caceres VS After selection in Caceres")
+```
+
+
+# Comparing SNP frequencies
+
+```{r}
+geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.rds")
+vec <- apply(geno[,-1],2,function(x) length(unique(x)))
+vecsup <- vec[vec>5]
+snps <- names(vecsup)
+length(vecsup) # Number of SNPs polymorphic in > 5 populations
+ncol(geno[,-1]) - length(vecsup) # Number of SNPs polymorphic in less than or equal to 5 populations
+genoBS <- geno %>% dplyr::select(contains(c("prov",snps)))
+```
+
+```{r}
+genoAS <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesAfterSelectionCacMad.rds")
+
+# In fact, I don't think I should remove the alleles with less than 5 polymorphic populations in this second matrix as this matrix will not be used in the GF in fact.. 
+
+
+# vec <- apply(geno[,-1],2,function(x) length(unique(x)))
+# vecsup <- vec[vec>5]
+# snps <- names(vecsup)
+# length(vecsup) # Number of SNPs polymorphic in > 5 populations
+# ncol(geno[,-1]) - length(vecsup) # Number of SNPs polymorphic in less than or equal to 5 populations
+# genoAS <- geno %>% dplyr::select(contains(c("prov",snps)))
+
+genoAS <- genoAS[,!(names(genoAS) %in% setdiff(names(genoAS),names(genoBS)))]
+#genoBS <- genoBS[,!(names(genoBS) %in% setdiff(names(genoBS),names(genoAS)))]
+
+```
+
+```{r}
+diff <- abs(genoBS[,-1] - genoAS[,-1])
+meancol <- apply(diff,2,mean)
+plot(sort(meancol))
+sumcol <- apply(diff,2,sum)
+plot(sort(sumcol))
+sum.diff <- names(which(sumcol>0.6))
+
+# R2 of allele in gf
+plot(sort(gf$result))
+res.gf <- names(which(gf$result>0.6))
+
+intersect(sum.diff,res.gf)
+gf$result[names(gf$result)=="SNP_1131"]
+sumcol[names(sumcol)=="SNP_1131"]
+
+most_important <- names(importance(gf))[1:25]
+```
+
+```{r fig.height=20, fig.width=20}
+# plot(gf, plot.type = "C", imp.vars = most_important,
+#      show.overall = F, legend = T, leg.posn = "topleft",
+#      leg.nspecies = 5, cex.lab = 0.7, cex.legend = 0.4,
+#      cex.axis = 0.6, line.ylab = 0.9, par.args = list(mgp = c(1.5,0.5, 0), 
+#                                                       mar = c(2.5, 1, 0.1, 0.5), 
+#                                                       omi = c(0,0.3, 0, 0)))
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars=c("bio13","bio14","bio5","bio5"),
+     plot.args=list(show.species=TRUE,show.overall=FALSE))
 ```
 
 `r knitr::opts_chunk$set(eval = F)`
