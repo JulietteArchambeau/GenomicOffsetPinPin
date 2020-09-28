@@ -108,135 +108,6 @@ GOAcrossRangeWithGDM <- function(x){
 
 # DATA
 
-## Calculating the Fst matrix
-
-To calculate the Fst matrix, we use Weir and Cockerham method. 
-
-
-```{r  LoadFilesAndFormat}
-# File with the genotype names (clone names)
-geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
-
-# File with the genotype of each clone for each SNP
-geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
-str(geno[,1:20])
-dim(geno) # SNPs in rows, genotypes in columns
-
-# In this file, SNPs have their names, but not the genotypes.
-head(geno[,1:10])
-
-# Removing the first two columns with allele info (A,T, G or C)
-geno <- geno[,3:dim(geno)[[2]]]
-
-# Give the genotype name for each column of geno
-colnames(geno) <- rownames(geno_names)
-
-rm(geno_names)
-
-head(geno[,1:10])
-dim(geno)
-unique(unlist(geno))
-```
-
-<!-- I followed the example in the package 'hierfstats' to format the dataset. Here is the exemple of the package hierfstats: -->
-
-```{r HierfstatsExample, eval=F,echo=F}
-data(gtrunchier)
-head(gtrunchier)
-pairwise.WCfst(gtrunchier[,-2],diploid=TRUE)
-```
-
-```{r  PrepareData}
-geno[geno ==1] <- 12
-geno[geno ==2] <- 22
-geno[geno ==0] <- 11
-geno <- t(geno) # SNps in column and genotypes in row
-geno <- as.data.frame(geno)
-geno$prov <- substr(row.names(geno), 0, 3)
-geno <- geno %>% dplyr::select(prov, everything())
-geno[1:10,1:10]
-dim(geno)
-```
-
-
-### Before selection
-
-```{r ComputeFstMatrixBS}
-# fst <- pairwise.WCfst(geno,diploid=TRUE)
-# saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawBS.rds")
-fst <- readRDS(file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawBS.rds")
-```
-
-4 Fst values have very very small negative values. We set them to 0.
-
-```{r NegValuestoZeroFstMatrix}
-fst[which(fst <0)]
-fst[which(fst <0)] <- 0
-round(fst,2)
-# saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34ProvsBS.rds")
-```
-
-
-### After selection in Madrid and Caceres
-
-```{r ExtractGenotypeNamesCacMad, eval=F}
-geno.names.sub <- readRDS(file="../../data/PreparedDFforGDMandGF/GenotypesToBeKeptAfterSelection/ListASCacMad.rds")
-
-# How many genotypes?
-length(geno.names.sub)
-
-# Select only genotypes which has at least one survivor
-geno <- geno[geno.names.sub,]
-dim(geno)
-
-fst <- pairwise.WCfst(geno,diploid=TRUE)
-saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawASCacMad.rds")
-```
-
-
-4 Fst values have very very small negative values. We set them to 0.
-
-```{r NegValuestoZeroFstMatrixCacMad}
-fst <- readRDS(file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawASCacMad.rds")
-fst[which(fst <0)]
-fst[which(fst <0)] <- 0
-round(fst,2)
-# saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34ProvsASCacMad.rds")
-```
-
-
-
-### After selection in Caceres
-
-```{r ExtractGenotypeNamesCacOnly, eval=F}
-geno.names.sub <- readRDS(file="../../data/PreparedDFforGDMandGF/GenotypesToBeKeptAfterSelection/ListASCacOnly.rds")
-
-# How many genotypes?
-length(geno.names.sub)
-
-# Select only genotypes which has at least one survivor
-geno <- geno[geno.names.sub,]
-dim(geno)
-fst <- pairwise.WCfst(geno,diploid=TRUE)
-saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawASCacOnly.rds")
-```
-
-```{r NegValuestoZeroFstMatrixCacOnly}
-fst <- readRDS(file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawASCacOnly.rds")
-fst[which(fst <0)]
-fst[which(fst <0)] <- 0
-round(fst,2)
-heatmap(fst)
-# saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34ProvsASCacOnly.rds")
-```
-
-
-16 Fst values have very very small negative values. We set them to 0.
-
-
-
-
-
 
 ## Climatic and soil values for each provenance
 
@@ -471,8 +342,6 @@ background <- projectRaster(background, crs="+proj=longlat +datum=WGS84 +no_defs
 background
 e <- extent(-10, 14, 31, 46)
 background <- crop(background, e)
-
-# text(9,32,"Potentiels refuges climatiques\ndes pois chiches\n lors du réchauffement climatique")
 ```
 
 
@@ -1213,12 +1082,53 @@ plot(gdmTab_noalt$distance, gdm.9.pred, xlab="Observed genetic distance",
 ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
 lines(c(-1,2), c(-1,2))
 
-plot(gdm.9.splineDat[[1]][,"bio13"], gdm.9.splineDat[[2]][,"bio13"], type="l",lwd=3, xlab="Precipitation of the wettest month (mm)", ylab="Partial Ecological Distance")
-plot(gdm.9.splineDat[[1]][,"bio14"], gdm.9.splineDat[[2]][,"bio14"], type="l",lwd=3, xlab="Precipitation of the driest month (mm)", ylab="Partial Ecological Distance")
-plot(gdm.9.splineDat[[1]][,"bio5"], gdm.9.splineDat[[2]][,"bio5"], type="l",lwd=3, xlab="Max T° warmest month (°C)", ylab="Partial Ecological Distance")
-plot(gdm.9.splineDat[[1]][,"bio6"], gdm.9.splineDat[[2]][,"bio6"], type="l",lwd=3, xlab="Min T° of the driest month (°C)", ylab="Partial Ecological Distance")
-plot(gdm.9.splineDat[[1]][,"sand_top"], gdm.9.splineDat[[2]][,"sand_top"], type="l",lwd=3, xlab="Sand top (%)", ylab="Partial Ecological Distance")
-plot(gdm.9.splineDat[[1]][,"depth_roots"], gdm.9.splineDat[[2]][,"depth_roots"], type="l",lwd=3, xlab="Depth roots", ylab="Partial Ecological Distance")
+plot(gdm.9.splineDat[[1]][,"bio13"], 
+     gdm.9.splineDat[[2]][,"bio13"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the wettest month (mm)", 
+     ylab="Partial Ecological Distance",
+     ylim=c(0,0.2))
+
+plot(gdm.9.splineDat[[1]][,"bio14"], 
+     gdm.9.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial Ecological Distance",
+     ylim=c(0,0.2))
+
+plot(gdm.9.splineDat[[1]][,"bio5"], 
+     gdm.9.splineDat[[2]][,"bio5"], 
+     type="l",
+     lwd=3, 
+     xlab="Max T° warmest month (°C)", 
+     ylab="Partial Ecological Distance",
+     ylim=c(0,0.2))
+
+plot(gdm.9.splineDat[[1]][,"bio6"], 
+     gdm.9.splineDat[[2]][,"bio6"], 
+     type="l",
+     lwd=3, 
+     xlab="Min T° of the driest month (°C)", 
+     ylab="Partial Ecological Distance",
+     ylim=c(0,0.2))
+
+plot(gdm.9.splineDat[[1]][,"sand_top"], 
+     gdm.9.splineDat[[2]][,"sand_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Sand top (%)", 
+     ylab="Partial Ecological Distance",
+     ylim=c(0,0.2))
+
+plot(gdm.9.splineDat[[1]][,"depth_roots"], 
+     gdm.9.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth roots (cm)", 
+     ylab="Partial Ecological Distance",
+     ylim=c(0,0.2))
 ```
 
 #### Current climate (Fitting the models and projecting)
@@ -1272,13 +1182,14 @@ rast2[mapCells] <- scalG
 rast3[mapCells] <- scalB
 ##stacks color rasters
 outRast <- stack(rast1, rast2, rast3)
-plotRGB(outRast, r = 1, g = 2, b = 3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
 
 nvs <- dim(pca$rotation)[1]
 vec <-  row.names(pca$rotation)
 lv <- length(vec)
 vind <- rownames(pca$rotation) %in% vec
-scal <- 20
+scal <- 15
 xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
 yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
 pca$rotation
@@ -1425,7 +1336,7 @@ dfGOallGCMs <- as.data.frame(genOffallGCMs)
 ```
 
 
-```{r Set5BeforeSelectionFutClimAllGCMsPlotsSSP585, fig.height=3,fig.width=6}
+```{r Set5BeforeSelectionFutClimAllGCMsPlotsSSP370, fig.height=3,fig.width=6}
 # Distribution of the genomic offset for each GCM
 dfGOallGCMs %>%  
   pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
@@ -1465,7 +1376,7 @@ dfGOallGCMs %>%
 DFtotssp585 <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanBS=mean,SdBS=sd)
 ```
 
-```{r PlotGOSet5BeforeSelectionFutClimAllGCMsSSP585,fig.height=8,fig.width=10}
+```{r PlotGOSet5BeforeSelectionFutClimAllGCMsSSP370,fig.height=8,fig.width=10}
 rast.go <- stackall[[1]]
 rast.go[rasValue$cell] <- dfGOallGCMs$mean
 plot(rast.go,box = FALSE,
@@ -1473,9 +1384,18 @@ plot(rast.go,box = FALSE,
      alpha=0.8,
       col=colorRampPalette(c("blue","yellow","red"))(255),
      zlim=c(0,0.1))
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plot(rast.go,box = FALSE,
+     axes = FALSE,
+     #alpha=0.8,
+      col=colorRampPalette(c("blue","yellow","red"))(255),
+     #zlim=c(0,0.1),
+     add=T,
+     bgalpha=0)
 ```
 
-```{r PlotFuturePredictionsAllGCMsSSP585, fig.height=6,fig.width=8}
+```{r PlotFuturePredictionsAllGCMsSSP370, fig.height=6,fig.width=8}
 meanIgnoringZeroes <- function(x) {
   mean(x[x!=0],na.rm=T)}
 
