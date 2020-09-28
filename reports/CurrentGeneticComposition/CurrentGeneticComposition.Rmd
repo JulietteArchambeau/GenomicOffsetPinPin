@@ -1,0 +1,728 @@
+---
+title: "Spatial predictions of the current genetic composition"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+---
+
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=TRUE)
+options(width = 300)
+library(knitr)
+library(hierfstat)
+library(reshape2)
+library(ggbiplot)
+library(gdm)
+#library(cowplot)
+#library(ggplot2)
+#library(ggpubr)
+#library(stringi)
+library(beepr)
+library(dplyr)
+#library(devtools)
+#library(xtable)
+library(tidyverse)
+#library(tibble)
+library(raster)
+library(sgdm)
+```
+
+
+<!-- Functions & Options used -->
+
+```{r FuntionsOptionsUsed,echo=F}
+source("../../scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+# Gray scale
+grayscale_colors <- gray.colors(100,            # number of different color levels
+                                start = 0.0,    # how black (0) to go
+                                end = 1.0,      # how white (1) to go
+                                gamma = 2.2,    # correction between how a digital
+                                # camera sees the world and how human eyes see it
+                                alpha = NULL)
+
+PlotCors <- function(data,select.var){
+  cor <- cor(data[,select.var])
+
+# matrix of the p-value of the correlation
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=45, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.01, insig = "blank", 
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- prcomp(data[,select.var], center = TRUE,scale. = TRUE)
+
+ggbiplot(pca,varname.size =4) +  ylim(-2.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+}
+```
+
+# Variable selection
+
+
+The variables were extracted from the EuMedClim database.
+
+Criteria to include the variables:
+
+- Variables included in Worldclim, to facilitate the projection under future climates.
+
+- less than 0.80 correlated.
+
+
+
+```{r LoadEnvData}
+data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+data <- data %>% select(prov,contains("ude_prov"),contains("bio"),contains("top_prov"),"depth_roots_prov")
+colnames(data) <- c("prov",str_sub(colnames(data)[-1],1,-6))
+data <- unique(data)
+data <- data[!(data$prov=="ROD"),]
+data
+
+topo <- readRDS(file="../../data/Topography/DfTopoVarbyProv.rds")
+topo <- topo %>% dplyr::select(-contains("ude")) %>% dplyr::rename(curvature=curvature_SRTM,
+                                                                 slope=slope_SRTM,
+                                                                 aspect=aspect_SRTM,
+                                                                 TWI=TWI_SRTM)
+data <- merge(data,topo,by="prov")
+```
+
+```{r VizualizeEnvData,fig.height=13,fig.width=13}
+cor <- data %>%  select(-prov) %>% cor()
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=23, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.01, insig = "blank", number.cex =0.8,tl.cex = 0.8,
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- data %>%   select(-prov) %>%  prcomp(center = TRUE,scale. = TRUE)
+ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+
+## Set "AvgSand"
+
+Topographic variables: `curvature`, `slope`, `aspect`.
+
+Soil variables:
+
+  - `sand_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing episodic events:
+
+  - `bio1`: annual daily mean temperature (°C)
+  - `bio2`: mean diurnal temperature range (max-min, °C)
+  - `bio12`: annual precipitation (mm)
+  - `bio14`: precipitation of the driest month (mm)
+
+
+```{r SelectEnvDataSetAvgSand,fig.height=6,fig.width=6}
+select.var.AvgSand <- c("bio1","bio2","bio12","bio14","sand_top","depth_roots","aspect","curvature","slope")
+PlotCors(data,select.var = select.var.AvgSand)
+```
+
+
+## Set "AvgWater"
+
+Topographic variables: `curvature`, `slope`, `aspect`.
+
+Soil variables:
+
+  - `water_top` = Total available water content
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing episodic events:
+
+  - `bio1`: annual daily mean temperature (°C)
+  - `bio2`: mean diurnal temperature range (max-min, °C)
+  - `bio12`: annual precipitation (mm)
+  - `bio14`: precipitation of the driest month (mm)
+
+
+```{r SelectEnvDataSetAvgWater,fig.height=6,fig.width=6}
+select.var.AvgWater <- c("bio1","bio2","bio12","bio14","water_top","depth_roots","aspect","curvature","slope")
+PlotCors(data,select.var = select.var.AvgWater)
+```
+
+## Set "ExtSand"
+
+Topographic variables: `curvature`, `slope`, `aspect`.
+
+Soil variables:
+
+  - `sand_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing episodic events:
+
+  - `bio5`: max temperature of the warmest month (°C)
+  - `bio6`: min temperature of the coldest month (°C)
+  - `bio13`: precipitation of the wettest month (mm)
+  - `bio14`: precipitation of the driest month (mm)
+  
+  
+```{r SelectEnvDataSetExtSand,fig.height=6,fig.width=6}
+select.var.ExtSand <- c("bio13","bio14","bio5","bio6","sand_top","depth_roots","aspect","curvature","slope")
+PlotCors(data,select.var = select.var.ExtSand)
+```
+
+
+## Set "ExtWater"
+
+Topographic variables: `curvature`, `slope`, `aspect`.
+
+Soil variables:
+
+  - `water_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing episodic events:
+
+  - `bio5`: max temperature of the warmest month (°C)
+  - `bio6`: min temperature of the coldest month (°C)
+  - `bio13`: precipitation of the wettest month (mm)
+  - `bio14`: precipitation of the driest month (mm)
+  
+  
+```{r SelectEnvDataSetExtWater,fig.height=6,fig.width=6}
+select.var.ExtWater <- c("bio13","bio14","bio5","bio6","water_top","depth_roots","aspect","curvature","slope")
+PlotCors(data,select.var = select.var.ExtWater)
+```
+
+
+
+# Maritime pine distribution (mask)
+
+```{r MaritimePineDistriMask}
+# Maritime pine distribution from EUFORGEN (shapefile)
+PinpinDistri  <- shapefile('../../../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/Pinus_pinaster_EUFORGEN.shp')
+```
+
+# Hillshade (background)
+
+```{r MapBackground}
+# fond de carte
+# https://land.copernicus.eu/imagery-in-situ/eu-dem/eu-dem-v1-0-and-derived-products/slope?tab=download
+# Need to create an account
+
+# I took the hillsahede map from here:
+# https://www.eea.europa.eu/data-and-maps/data/digital-elevation-model-of-europe
+
+background <- raster("../../data/maps/EuropeanData/hillshade1x1.tif")
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+background <- projectRaster(background, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+background
+e <- extent(-10, 14, 31, 46)
+background <- crop(background, e)
+```
+
+# GDM analysis
+
+> Load the Fst matrix
+
+```{r LoadFstMatrix}
+fstmat <- readRDS(file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34ProvsBS.rds")
+fstmat <- as.data.frame(fstmat) 
+fstmat <- fstmat %>%  tibble::rownames_to_column("prov") # The distance matrix must have as the first column the names of the provenances
+mean(unlist(fstmat[,-1]),na.rm=T)
+range(unlist(fstmat[,-1]),na.rm=T)
+sd(unlist(fstmat[,-1]),na.rm=T)
+```
+
+## Set "AvgSand"
+
+```{r FormatDataGeoDistSetAvgSand}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgSand)]
+
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+```
+
+```{r RunningGDMGeoDistSetAvgSand,fig.height=7,fig.width=7}
+gdm.AvgSand <- gdm(gdmTab, geo=T)
+gdm.AvgSand
+
+# Deviance explained 
+gdm.AvgSand$explained
+
+sum(gdm.AvgSand$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+
+# Cross-validation
+sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+gdm.AvgSand.splineDat <- isplineExtract(gdm.AvgSand)
+
+plot(gdm.AvgSand.splineDat$x[,"Geographic"], gdm.AvgSand.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial genetic distance") # or ylab= f(Geographic distance)
+
+gdm.AvgSand.pred <- predict.gdm(gdm.AvgSand, gdmTab)
+
+plot(gdmTab$distance, gdm.AvgSand.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio1"], 
+     gdm.AvgSand.splineDat[[2]][,"bio1"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual daily mean T° (C°)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio14"], 
+     gdm.AvgSand.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio2"], 
+     gdm.AvgSand.splineDat[[2]][,"bio2"], 
+     type="l",
+     lwd=3, 
+     xlab="Mean diurnal T° range (max-min, °C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio12"], 
+     gdm.AvgSand.splineDat[[2]][,"bio12"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual precipitation (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgSand.splineDat[[1]][,"sand_top"], 
+     gdm.AvgSand.splineDat[[2]][,"sand_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Sand content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgSand.splineDat[[1]][,"depth_roots"], 
+     gdm.AvgSand.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgSand.splineDat[[1]][,"curvature"], 
+     gdm.AvgSand.splineDat[[2]][,"curvature"], 
+     type="l",
+     lwd=3, 
+     xlab="Curvature", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgSand.splineDat[[1]][,"aspect"], 
+     gdm.AvgSand.splineDat[[2]][,"aspect"], 
+     type="l",
+     lwd=3, 
+     xlab="Aspect", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgSand.splineDat[[1]][,"slope"], 
+     gdm.AvgSand.splineDat[[2]][,"slope"], 
+     type="l",
+     lwd=3, 
+     xlab="Slope", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+```
+
+
+## Set "AvgWater"
+
+```{r FormatDataGeoDistSetAvgWater}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgWater)]
+
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+```
+
+```{r RunningGDMGeoDistSetAvgWater,fig.height=7,fig.width=7}
+gdm.AvgWater <- gdm(gdmTab, geo=T)
+gdm.AvgWater
+
+# Deviance explained 
+gdm.AvgWater$explained
+
+sum(gdm.AvgWater$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+
+# Cross-validation
+sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+gdm.AvgWater.splineDat <- isplineExtract(gdm.AvgWater)
+
+plot(gdm.AvgWater.splineDat$x[,"Geographic"], gdm.AvgWater.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial genetic distance") # or ylab= f(Geographic distance)
+
+gdm.AvgWater.pred <- predict.gdm(gdm.AvgWater, gdmTab)
+
+plot(gdmTab$distance, gdm.AvgWater.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio1"], 
+     gdm.AvgWater.splineDat[[2]][,"bio1"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual daily mean T° (C°)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio14"], 
+     gdm.AvgWater.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio2"], 
+     gdm.AvgWater.splineDat[[2]][,"bio2"], 
+     type="l",
+     lwd=3, 
+     xlab="Mean diurnal T° range (max-min, °C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio12"], 
+     gdm.AvgWater.splineDat[[2]][,"bio12"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual precipitation (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"water_top"], 
+     gdm.AvgWater.splineDat[[2]][,"water_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Water content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"depth_roots"], 
+     gdm.AvgWater.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"curvature"], 
+     gdm.AvgWater.splineDat[[2]][,"curvature"], 
+     type="l",
+     lwd=3, 
+     xlab="Curvature", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"aspect"], 
+     gdm.AvgWater.splineDat[[2]][,"aspect"], 
+     type="l",
+     lwd=3, 
+     xlab="Aspect", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"slope"], 
+     gdm.AvgWater.splineDat[[2]][,"slope"], 
+     type="l",
+     lwd=3, 
+     xlab="Slope", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+```
+
+
+## Set "ExtSand"
+
+```{r FormatDataGeoDistSetExtSand}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtSand)]
+
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+```
+
+```{r RunningGDMGeoDistSetExtSand,fig.height=7,fig.width=7}
+gdm.ExtSand <- gdm(gdmTab, geo=T)
+gdm.ExtSand
+
+# Deviance explained 
+gdm.ExtSand$explained
+
+sum(gdm.ExtSand$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+
+# Cross-validation
+sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+gdm.ExtSand.splineDat <- isplineExtract(gdm.ExtSand)
+
+plot(gdm.ExtSand.splineDat$x[,"Geographic"], gdm.ExtSand.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial genetic distance") # or ylab= f(Geographic distance)
+
+gdm.ExtSand.pred <- predict.gdm(gdm.ExtSand, gdmTab)
+
+plot(gdmTab$distance, gdm.ExtSand.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio5"], 
+     gdm.ExtSand.splineDat[[2]][,"bio5"], 
+     type="l",
+     lwd=3, 
+     xlab="Max T° warmest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio6"], 
+     gdm.ExtSand.splineDat[[2]][,"bio6"], 
+     type="l",
+     lwd=3, 
+     xlab="Min T° of the coldest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio13"], 
+     gdm.ExtSand.splineDat[[2]][,"bio13"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the wettest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio14"], 
+     gdm.ExtSand.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"sand_top"], 
+     gdm.ExtSand.splineDat[[2]][,"sand_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Sand content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"depth_roots"], 
+     gdm.ExtSand.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"curvature"], 
+     gdm.ExtSand.splineDat[[2]][,"curvature"], 
+     type="l",
+     lwd=3, 
+     xlab="Curvature", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"aspect"], 
+     gdm.ExtSand.splineDat[[2]][,"aspect"], 
+     type="l",
+     lwd=3, 
+     xlab="Aspect", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"slope"], 
+     gdm.ExtSand.splineDat[[2]][,"slope"], 
+     type="l",
+     lwd=3, 
+     xlab="Slope", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+```
+
+
+
+## Set "ExtWater"
+
+```{r FormatDataGeoDistSetExtWater}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtWater)]
+
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+```
+
+```{r RunningGDMGeoDistSetExtWater,fig.height=7,fig.width=7}
+gdm.ExtWater <- gdm(gdmTab, geo=T)
+gdm.ExtWater
+
+# Deviance explained 
+gdm.ExtWater$explained
+
+sum(gdm.ExtWater$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+
+# Cross-validation
+sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+
+
+par(mfrow=c(2,2))
+gdm.ExtWater.splineDat <- isplineExtract(gdm.ExtWater)
+
+plot(gdm.ExtWater.splineDat$x[,"Geographic"], gdm.ExtWater.splineDat$y[,"Geographic"], lwd=3,
+type="l", xlab="Geographic distance", ylab="Partial genetic distance") # or ylab= f(Geographic distance)
+
+gdm.ExtWater.pred <- predict.gdm(gdm.ExtWater, gdmTab)
+
+plot(gdmTab$distance, gdm.ExtWater.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio5"], 
+     gdm.ExtWater.splineDat[[2]][,"bio5"], 
+     type="l",
+     lwd=3, 
+     xlab="Max T° warmest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio6"], 
+     gdm.ExtWater.splineDat[[2]][,"bio6"], 
+     type="l",
+     lwd=3, 
+     xlab="Min T° of the coldest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio13"], 
+     gdm.ExtWater.splineDat[[2]][,"bio13"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the wettest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio14"], 
+     gdm.ExtWater.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"water_top"], 
+     gdm.ExtWater.splineDat[[2]][,"water_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Water content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"depth_roots"], 
+     gdm.ExtWater.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"curvature"], 
+     gdm.ExtWater.splineDat[[2]][,"curvature"], 
+     type="l",
+     lwd=3, 
+     xlab="Curvature", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"aspect"], 
+     gdm.ExtWater.splineDat[[2]][,"aspect"], 
+     type="l",
+     lwd=3, 
+     xlab="Aspect", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"slope"], 
+     gdm.ExtWater.splineDat[[2]][,"slope"], 
+     type="l",
+     lwd=3, 
+     xlab="Slope", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.2))
+```
