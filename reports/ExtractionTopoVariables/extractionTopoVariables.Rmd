@@ -1,0 +1,481 @@
+---
+title: "Extraction and comparison of the topographic variables by provenance"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+options(width = 300)
+library(knitr)
+library(raster)
+library(rgeos)
+library(ggbiplot)
+library(tidyverse)
+library(dplyr)
+library(RColorBrewer)
+library(leaflet)
+library(htmltools)
+library(furrr)
+future::plan(multiprocess)
+library(ggplot2)
+library(GGally)
+library(viridis)
+library(hrbrthemes)
+```
+
+
+# Questions and conclusions
+
+> Initial questions
+
+In this document, we try to find the best way to calculate the topographic variables and determine which variables to include in the models. We compared the variables values obtained by SAGA (via `saga_cmd`: see the script: "CalculateTopoVariables/CreateTifsTopoVariables.sh") and R ( `terrain` function from the `raster` package; see script "CalculateTopoVariables/CalculatingTopoVarWithR.R"). 
+
+The main sources of bias/loss of precision we identified are:
+
+- reprojection from the projection in a cartesian system (in meters here) used to calculate the topographic variables to the projection in a system with geographic coordinates long/lat. All was done in the WGS84 datum. 
+
+- Resampling the raster of topographic variables at 90m resolution (SRTM resolution) to a lower resolution (WorldClim resolution). For some variables, e.g. curvature,negative and positive values in mountaineous areas can cancel out when we resample at lower resolution. 
+
+> Conclusions
+
+- The topographic variables "Topographic Position Index", "aspect" and "curvature" were highly affected by the resampling to a lower resolution (very low correlation coeff $\rho$ between the variables values at 90m res and at 1km res, both with R and SAGA). So we decided not to include them in the models because it would affect the projections at the species range. 
+
+- The other variables ("slope","Topographic Ruggdness Index" and "roughness") show a good correlation between values before and after the resampling at a lower resolution and were highly correlated between each other. So one of these varibles should be chosen to be included to avoid including correlated variables in the models. We chosed the variable "Topographic Ruggdness Index" as it has the strongest correlation between values before and after the resampling at a lower resolution, both with r and SAGA. Values obtained with R and SAGA were also highly similar, which comfort us in selecting this variable for further analyses. 
+
+
+# Some needed data
+
+Functions used:
+
+```{r FunctionsUsed}
+ExtractValuesFromRasterWithCoordinates <- function(coord, clim.var.raster){
+  
+  if(crs(clim.var.raster)@projargs == "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"){
+    ext <- raster::extract(clim.var.raster,coord[,c("longitude","latitude")]) 
+  } else {
+    d <- coord[,c("longitude","latitude")]
+    coordinates(d) <- c("longitude", "latitude")
+    proj4string(d) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0") 
+    d <- spTransform(d, crs(clim.var.raster))
+    ext <- raster::extract(clim.var.raster,d) 
+  }
+
+}
+```
+
+Provenance coordinates (in geographic coordinates long/lat WGS84 datum):
+
+```{r DataframeCoordProv, message =F}
+data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+df <- unique(data[,c("prov","longitude_prov","latitude_prov","altitude_prov")])
+df <- df[!(df$prov=="ROD"),]
+colnames(df) <- c("prov","longitude","latitude","altitude_base")
+```
+
+Raster use to have the extent and resolution we want for the projections:
+
+```{r RasterClim}
+rast.clim <- raster("../../data/climate/Tiff_1901_2009/map_bio1_1901-2009_with_34_sampling_points.tif")
+```
+
+
+
+# UTM31N projection - 90m res - SAGA
+
+```{r ExtractValues,fig.height=7,fig.width=14}
+# Altitude is in WGS84 datum geographic coordinates 
+clim.var.raster <- raster("../../data/Topography/SrtmWGS84/MosaicTif/srtm_mosaic.tif")
+df$altitude_UTM31N_90m_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+# The others are in UTM31N projection from SRTM (90m res)
+clim.var.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsUTM31N/curvature_mosaic_UTM31N.tif")
+df$curvature_UTM31N_90m_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+clim.var.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsUTM31N/slope_mosaic_UTM31N.tif")
+df$slope_UTM31N_90m_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+clim.var.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsUTM31N/aspect_mosaic_UTM31N.tif")
+df$aspect_UTM31N_90m_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+clim.var.raster <- raster("../../data/Topography/TWI/TWI_UTM31N.tif")
+df$TWI_UTM31N_90m_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+df
+```
+
+```{r VizualizationSAGA, fig.height=8,fig.width=10}
+source("../../scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+cor <- df %>%  select(contains("UTM31N_90m_SAGA")) %>% cor()
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=23, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.05, insig = "blank", number.cex =0.8,tl.cex = 0.8,
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- df %>%  select(contains("UTM31N_90m_SAGA")) %>%  prcomp(center = TRUE,scale. = TRUE)
+ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+# Lat/long in WGS84 - 90m res (SRTM res) - R
+
+```{r ExtractValuesCalcR,fig.height=7,fig.width=14}
+clim.var.raster <- raster("../../data/Topography/SrtmWGS84/MosaicTif/srtm_mosaic.tif")
+df$altitude_WGS84_90m_R <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+clim.var.raster <- raster("../../data/Topography/TopoWithR/TPI_90m.grd")
+df$TPI_WGS84_90m_R <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+clim.var.raster <- raster("../../data/Topography/TopoWithR/Slope_90m.grd")
+df$slope_WGS84_90m_R <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+clim.var.raster <- raster("../../data/Topography/TopoWithR/Aspect_90m.grd")
+df$aspect_WGS84_90m_R <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+clim.var.raster <- raster("../../data/Topography/TopoWithR/TRI_90m.grd")
+df$TRI_WGS84_90m_R <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+clim.var.raster <- raster("../../data/Topography/TopoWithR/Roughness_90m.grd")
+df$roughness_WGS84_90m_R <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster)
+
+df
+```
+
+```{r VizualizationR, fig.height=8,fig.width=10}
+source("../../scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+cor <- df %>%  select(contains("WGS84_90m_R")) %>% cor()
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=23, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.05, insig = "blank", number.cex =0.8,tl.cex = 0.8,
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- df %>%  select(contains("WGS84_90m_R")) %>%  prcomp(center = TRUE,scale. = TRUE)
+ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+
+
+# Lat/long in WGS84 - 90m res (SRTM res) - SAGA
+
+> Curvature
+
+**Reproject with R**
+
+```{r CurvatureFromR, eval=F}
+#clim.var.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsUTM31N/curvature_mosaic_UTM31N.tif")
+#clim.var.raster.geo <- projectRaster(clim.var.raster, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+#e <- extent( -10, 14, 31, 50 )
+#clim.var.raster.geo <- crop(clim.var.raster.geo, e)
+#writeRaster(clim.var.raster.geo, filename="../../data/Topography/SlopeAspectCurvature/TifsWGS84/CurvatureWGS84_WithR.grd", format="raster",overwrite=TRUE)
+clim.var.raster.geo <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/CurvatureWGS84_WithR.grd")
+df$curvature_WGS84_resSRTM_SAGAprojR <- ExtractValuesFromRasterWithCoordinates(coord=df,clim.var.raster.geo)
+```
+
+**Reproject with Saga**
+
+```{r CurvatureFromSaga}
+topo.rast.wgs84.saga <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/curvature_mosaic_WGS84.tif")
+df$curvature_WGS84_resSRTM_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.rast.wgs84.saga)
+```
+
+> Aspect
+
+**Reproject with Saga**
+
+```{r AspectFromSaga}
+topo.rast.wgs84.saga <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/aspect_mosaic_WGS84.tif")
+df$aspect_WGS84_resSRTM_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.rast.wgs84.saga)
+```
+
+> Slope
+
+**Reproject with Saga**
+
+```{r SlopeFromSaga}
+topo.rast.wgs84.saga <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/slope_mosaic_WGS84.tif")
+df$slope_WGS84_resSRTM_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.rast.wgs84.saga)
+```
+
+> TRI
+
+Calculated based on: Riley, S.J., De Gloria, S.D., Elliot, R. (1999): A Terrain Ruggedness that Quantifies Topographic Heterogeneity. Intermountain Journal of Science, Vol.5, No.1-4, pp.23-27.
+
+**Reproject with Saga**
+
+```{r TRIFromSaga}
+topo.rast.wgs84.saga <- raster("../../data/Topography/TRI/TifsWGS84/TRI_WGS84.tif")
+df$TRI_WGS84_resSRTM_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.rast.wgs84.saga)
+```
+
+
+
+
+# Lat/long in WGS84 - 1km res (WorldClim res) - SAGA
+
+> Curvature
+
+```{r ExtendCurvature}
+#topo.rast.wgs84.saga <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/curvature_mosaic_WGS84.tif")
+#topo.raster  <- crop(topo.rast.wgs84.saga,extent(rast.clim)) # attribute the extent of climatic raster to topo rasters
+#topo.raster <- raster::resample(topo.raster,rast.clim) # same number of cells between the altitude and climatic rasters
+#writeRaster(topo.raster, filename="../../data/Topography/SlopeAspectCurvature/TifsWGS84/CurvatureWGS84_resWorldClim_Saga.grd", format="raster",overwrite=TRUE)
+topo.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/CurvatureWGS84_resWorldClim_Saga.grd")
+df$curvature_WGS84_resWorlClim_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.raster)
+```
+
+
+> Aspect
+
+```{r ExtendResAspect}
+# topo.rast.wgs84.saga <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/aspect_mosaic_WGS84.tif")
+# topo.raster  <- crop(topo.rast.wgs84.saga,extent(rast.clim)) # attribute the extent of climatic raster to topo rasters
+# topo.raster <- raster::resample(topo.raster,rast.clim) # same number of cells between the altitude and climatic rasters
+# writeRaster(topo.raster, filename="../../data/Topography/SlopeAspectCurvature/TifsWGS84/AspectWGS84_resWorldClim_Saga.grd", format="raster",overwrite=TRUE)
+topo.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/AspectWGS84_resWorldClim_Saga.grd")
+df$aspect_WGS84_resWorlClim_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.raster)
+```
+
+> Slope
+
+```{r ExtendResSlope}
+# topo.rast.wgs84.saga <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/slope_mosaic_WGS84.tif")
+# topo.raster  <- crop(topo.rast.wgs84.saga,extent(rast.clim)) # attribute the extent of climatic raster to topo rasters
+# topo.raster <- raster::resample(topo.raster,rast.clim) # same number of cells between the altitude and climatic rasters
+# writeRaster(topo.raster, filename="../../data/Topography/SlopeAspectCurvature/TifsWGS84/SlopeWGS84_resWorldClim_Saga.grd", format="raster",overwrite=TRUE)
+topo.raster <- raster("../../data/Topography/SlopeAspectCurvature/TifsWGS84/SlopeWGS84_resWorldClim_Saga.grd")
+df$slope_WGS84_resWorlClim_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.raster)
+```
+
+> TRI
+
+```{r ExtendResTRI}
+# topo.rast.wgs84.saga <- raster("../../data/Topography/TRI/TifsWGS84/TRI_WGS84.tif")
+# topo.raster  <- crop(topo.rast.wgs84.saga,extent(rast.clim)) # attribute the extent of climatic raster to topo rasters
+# topo.raster <- raster::resample(topo.raster,rast.clim) # same number of cells between the altitude and climatic rasters
+# writeRaster(topo.raster, filename="../../data/Topography/TRI/TifsWGS84/TRIWGS84_resWorldClim_Saga.grd", format="raster",overwrite=TRUE)
+topo.raster <- raster("../../data/Topography/TRI/TifsWGS84/TRIWGS84_resWorldClim_Saga.grd")
+df$TRI_WGS84_resWorlClim_SAGA <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.raster)
+```
+
+
+```{r VizualizationWGS84ResWorldClimSAGA, fig.height=8,fig.width=10}
+source("../../scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+cor <- df %>%  select(contains("WGS84_resWorlClim_SAGA")) %>% cor()
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=23, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.05, insig = "blank", number.cex =0.8,tl.cex = 0.8,
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- df %>%  select(contains("WGS84_resWorlClim_SAGA")) %>%  prcomp(center = TRUE,scale. = TRUE)
+ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+
+
+
+
+
+# Lat/long in WGS84 - 1km res (WorldClim res) - R
+
+> Slope
+
+
+```{r SlopeFromR}
+rast <- raster("../../data/Topography/TopoWithR/Slope_90m.grd")
+# 
+# topo.raster  <- crop(rast,extent(rast.clim)) # attribute the extent of climatic raster to topo rasters
+# topo.raster <- raster::resample(topo.raster,rast.clim) # same number of cells between the altitude and climatic rasters
+# writeRaster(topo.raster, filename="../../data/Topography/TopoWithR/Slope_WGS84_1km.grd", format="raster",overwrite=TRUE)
+topo.raster <- raster("../../data/Topography/TopoWithR/Slope_WGS84_1km.grd")
+
+df$slope_WGS84_resWorlClim_CalcR <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.raster)
+df %>% dplyr::select(prov,contains("slope"))
+df %>% dplyr::select(contains("slope")) %>% cor()
+```
+
+Slope values at 1km resolution calculated either with R or Saga are highly correlated: $\rho = 0.988$. Nearly the same for values at 90m resolution: $\rho = 0.977$. After projecting slope raster in a lower resolution (from 90m res to 1km res), $\rho = 0.922$ when the slope values were calculated with Saga, and $\rho = 0.901$ when the slope values were calculated with R.
+
+
+> Aspect
+
+
+```{r AspectFromR}
+rast <- raster("../../data/Topography/TopoWithR/Aspect_90m.grd")
+# 
+# topo.raster  <- crop(rast,extent(rast.clim)) # attribute the extent of climatic raster to topo rasters
+# topo.raster <- raster::resample(topo.raster,rast.clim) # same number of cells between the altitude and climatic rasters
+# writeRaster(topo.raster, filename="../../data/Topography/TopoWithR/Aspect_WGS84_1km.grd", format="raster",overwrite=TRUE)
+topo.raster <- raster("../../data/Topography/TopoWithR/Aspect_WGS84_1km.grd")
+
+df$aspect_WGS84_resWorlClim_CalcR <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.raster)
+df %>% dplyr::select(prov,contains("aspect"))
+df %>% dplyr::select(contains("aspect")) %>% cor()
+```
+
+Correlations are much weaker than with the slope. Aspect values at 1km resolution calculated either with R or Saga are correlated: $\rho = 0.884$. Less correlated with values at 90m resolution: $\rho = 0.778$. After projecting aspect raster in a lower resolution (from 90m res to 1km res), $\rho = 0.516$ when the aspect values were calculated with Saga, and $\rho = 0.451$ when the aspect values were calculated with R.
+
+
+
+> Roughness
+
+Roughness is the difference between the maximum and the minimum value of a cell and its 8 surrounding cells.
+
+
+```{r RoughnessFromR}
+rast <- raster("../../data/Topography/TopoWithR/Roughness_90m.grd")
+# 
+# topo.raster  <- crop(rast,extent(rast.clim)) # attribute the extent of climatic raster to topo rasters
+# topo.raster <- raster::resample(topo.raster,rast.clim) # same number of cells between the altitude and climatic rasters
+# writeRaster(topo.raster, filename="../../data/Topography/TopoWithR/Roughness_WGS84_1km.grd", format="raster",overwrite=TRUE)
+topo.raster <- raster("../../data/Topography/TopoWithR/Roughness_WGS84_1km.grd")
+
+df$roughness_WGS84_resWorlClim_CalcR <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.raster)
+df %>% dplyr::select(prov,contains("roughness"))
+df %>% dplyr::select(contains("roughness")) %>% cor()
+```
+
+
+> Topographic Ruggedness Index (TRI)
+
+TRI (Terrain Ruggedness Index) is the mean of the absolute differences between the value of a cell and the value of its 8 surrounding cells.
+
+From Wilson (2007): "The Terrain Ruggedness Index (TRI) was adapted by Valentine et al. (2004) for bathymetry data from the method presented by Riley et al. (1999) for terrestrial ruggedness. The TRI value is a measure of the local variation in seabed terrain about a central pixel. Since variations in the seabed terrain are associated with changes in habitat and colonization, they may be particularly relevant for habitat mapping studies. The TRI value is calculated by comparing a central pixel with its neighbors, taking the absolute values of the differences, and averaging the result."
+
+```{r TRIFromR}
+rast <- raster("../../data/Topography/TopoWithR/TRI_90m.grd")
+# 
+# topo.raster  <- crop(rast,extent(rast.clim)) # attribute the extent of climatic raster to topo rasters
+# topo.raster <- raster::resample(topo.raster,rast.clim) # same number of cells between the altitude and climatic rasters
+# writeRaster(topo.raster, filename="../../data/Topography/TopoWithR/TRI_WGS84_1km.grd", format="raster",overwrite=TRUE)
+topo.raster <- raster("../../data/Topography/TopoWithR/TRI_WGS84_1km.grd")
+
+df$TRI_WGS84_resWorlClim_CalcR <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.raster)
+df %>% dplyr::select(prov,contains("TRI"))
+df %>% dplyr::select(contains("TRI")) %>% cor()
+```
+
+
+> Topographic Position Index (TPI)
+
+TPI (Topographic Position Index) is the difference between the value of a cell and the mean value of its 8 surrounding cells. 
+
+
+```{r TPIFromR}
+rast <- raster("../../data/Topography/TopoWithR/TPI_90m.grd")
+# 
+# topo.raster  <- crop(rast,extent(rast.clim)) # attribute the extent of climatic raster to topo rasters
+# topo.raster <- raster::resample(topo.raster,rast.clim) # same number of cells between the altitude and climatic rasters
+# writeRaster(topo.raster, filename="../../data/Topography/TopoWithR/TPI_WGS84_1km.grd", format="raster",overwrite=TRUE)
+topo.raster <- raster("../../data/Topography/TopoWithR/TPI_WGS84_1km.grd")
+
+df$TPI_WGS84_resWorlClim_CalcR <- ExtractValuesFromRasterWithCoordinates(coord=df,topo.raster)
+df %>% dplyr::select(prov,contains("TPI"))
+df %>% dplyr::select(contains("TPI")) %>% cor()
+```
+
+> Very very bad index to project the model predictions across the species range as the index values in the provenance location at 90m resolution (SRTM resolution) are not correlated at all with the index values at 1km resolution (WorldClim resolution).
+
+
+> Curvature
+
+```{r Curvature}
+df %>% dplyr::select(prov,contains("curvature"))
+df %>% dplyr::select(contains("curvature")) %>% cor()
+```
+
+
+
+```{r VizualizationWGS84CalcR, fig.height=8,fig.width=10}
+source("../../scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+cor <- df %>%  select(contains("WGS84_resWorlClim_CalcR")) %>% cor()
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=23, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.05, insig = "blank", number.cex =0.8,tl.cex = 0.8,
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+
+pca <- df %>%  select(contains("WGS84_resWorlClim_CalcR")) %>%  prcomp(center = TRUE,scale. = TRUE)
+ggbiplot(pca,varname.size =4) +   ylim(-3, 2.8) +    xlim(-3.2, 2) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+```
+
+
+
+```{r SaveDF}
+saveRDS(df,file="../../data/Topography/DfTopoVarbyProv.rds")
+```
