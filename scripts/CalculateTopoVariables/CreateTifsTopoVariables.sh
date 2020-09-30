@@ -100,6 +100,9 @@ saga_cmd pj_proj4 4 -SOURCE SrtmWGS84/SGRD/srtm_mosaic.sgrd \
 ####### 5/ Calculating the slope, aspect and curvature
 ####### ----------------------------------------------
 
+
+# Units for slope and aspect are in radians (default option)
+
 saga_cmd ta_morphometry 0 -ELEVATION SrtmUTM/srtm_mosaic_UTM31N.sgrd \
 						  -SLOPE SlopeAspectCurvature/gridsUTM31N/slope_mosaic_UTM31N.sgrd \
 						  -ASPECT SlopeAspectCurvature/gridsUTM31N/aspect_mosaic_UTM31N.sgrd \
@@ -128,3 +131,54 @@ gdal_translate -of GTiff TWI/TWI_UTM31N.sdat TWI/TWI_UTM31N.tif # SAGA format ->
 
 # https://www.researchgate.net/post/How_do_I_mosaic_images_of_two_different_UTM_zones_for_change_detection
 # " One thing to note is that reprojecting the image data from one UTM zone into a different UTM zone for an image that already has projection information stored for it, such as a geotiff, will not impact the image pixel values. This is because it will simply convert the header coordinate information over to the new coordinate system origin and then each pixel x,y location is based on its row,column offset and pixel size distance from origin. This process is different than georectification where you would be applying a geometric transformation to each pixel location to warp it to match control points in some other coordinate system. The image would then need to be resampled and hence the pixel values change which could mess up your change detection scheme."
+
+
+####### 7/ Reprojecting from UTM 31N to WGS 84
+####### --------------------------------------
+
+
+# I need to reproject in WGS 84 to include in a same stack the climatic, soil and topographic variables for GF and GDM analyses.
+
+
+# Curvature
+saga_cmd pj_proj4 0 -CRS_METHOD 0 -CRS_PROJ4 "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs" -GRIDS SlopeAspectCurvature/gridsUTM31N/curvature_mosaic_UTM31N.sgrd
+saga_cmd pj_proj4 4 -SOURCE SlopeAspectCurvature/gridsUTM31N/curvature_mosaic_UTM31N.sgrd \
+					-CRS_METHOD 0 \
+					-CRS_PROJ4 "+proj=longlat +datum=WGS84 +no_defs" \
+					-TARGET_GRID SlopeAspectCurvature/TifsWGS84/curvature_mosaic_WGS84.sgrd			
+gdal_translate -of GTiff SlopeAspectCurvature/TifsWGS84/curvature_mosaic_WGS84.sdat SlopeAspectCurvature/TifsWGS84/curvature_mosaic_WGS84.tif
+
+
+# Aspect
+saga_cmd pj_proj4 0 -CRS_METHOD 0 -CRS_PROJ4 "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs" -GRIDS SlopeAspectCurvature/gridsUTM31N/aspect_mosaic_UTM31N.sgrd
+saga_cmd pj_proj4 4 -SOURCE SlopeAspectCurvature/gridsUTM31N/aspect_mosaic_UTM31N.sgrd \
+					-CRS_METHOD 0 \
+					-CRS_PROJ4 "+proj=longlat +datum=WGS84 +no_defs" \
+					-TARGET_GRID SlopeAspectCurvature/TifsWGS84/aspect_mosaic_WGS84.sgrd		
+gdal_translate -of GTiff SlopeAspectCurvature/TifsWGS84/aspect_mosaic_WGS84.sdat SlopeAspectCurvature/TifsWGS84/aspect_mosaic_WGS84.tif
+
+
+# Slope
+saga_cmd pj_proj4 0 -CRS_METHOD 0 -CRS_PROJ4 "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs" -GRIDS SlopeAspectCurvature/gridsUTM31N/slope_mosaic_UTM31N.sgrd
+saga_cmd pj_proj4 4 -SOURCE SlopeAspectCurvature/gridsUTM31N/slope_mosaic_UTM31N.sgrd \
+					-CRS_METHOD 0 \
+					-CRS_PROJ4 "+proj=longlat +datum=WGS84 +no_defs" \
+					-TARGET_GRID SlopeAspectCurvature/TifsWGS84/slope_mosaic_WGS84.sgrd
+gdal_translate -of GTiff SlopeAspectCurvature/TifsWGS84/slope_mosaic_WGS84.sdat SlopeAspectCurvature/TifsWGS84/slope_mosaic_WGS84.tif
+
+
+
+####### 8/ Calculating the Topographic Ruggedness Index (TRI)
+####### -----------------------------------------------------
+
+# Calculated based on: Riley, S.J., De Gloria, S.D., Elliot, R. (1999): A Terrain Ruggedness that Quantifies Topographic Heterogeneity. Intermountain Journal of Science, Vol.5, No.1-4, pp.23-27.
+
+saga_cmd ta_morphometry 16 -DEM SrtmUTM/srtm_mosaic_UTM31N.sgrd -TRI TRI/gridsUTM31N/TRI.sgrd
+
+# Reproject in WGS84
+saga_cmd pj_proj4 0 -CRS_METHOD 0 -CRS_PROJ4 "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs" -GRIDS TRI/gridsUTM31N/TRI.sgrd
+saga_cmd pj_proj4 4 -SOURCE TRI/gridsUTM31N/TRI.sgrd \
+					-CRS_METHOD 0 \
+					-CRS_PROJ4 "+proj=longlat +datum=WGS84 +no_defs" \
+					-TARGET_GRID TRI/gridsWGS84/TRI_WGS84.sgrd		
+gdal_translate -of GTiff TRI/gridsWGS84/TRI_WGS84.sdat TRI/TifsWGS84/TRI_WGS84.tif
