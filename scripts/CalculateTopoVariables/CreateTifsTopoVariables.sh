@@ -182,3 +182,18 @@ saga_cmd pj_proj4 4 -SOURCE TRI/gridsUTM31N/TRI.sgrd \
 					-CRS_PROJ4 "+proj=longlat +datum=WGS84 +no_defs" \
 					-TARGET_GRID TRI/gridsWGS84/TRI_WGS84.sgrd		
 gdal_translate -of GTiff TRI/gridsWGS84/TRI_WGS84.sdat TRI/TifsWGS84/TRI_WGS84.tif
+
+
+####### 9/ Hillshade
+####### ------------
+
+saga_cmd ta_lighting 0 -ELEVATION SrtmUTM/srtm_mosaic_UTM31N.sgrd -SHADE Hillshade/gridsUTM31N/Hillshade_UTM31N.sgrd
+
+# Reproject in WGS84
+saga_cmd pj_proj4 0 -CRS_METHOD 0 -CRS_PROJ4 "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs" -GRIDS Hillshade/gridsUTM31N/Hillshade_UTM31N.sgrd
+saga_cmd pj_proj4 4 -SOURCE Hillshade/gridsUTM31N/Hillshade_UTM31N.sgrd \
+					-CRS_METHOD 0 \
+					-CRS_PROJ4 "+proj=longlat +datum=WGS84 +no_defs" \
+					-TARGET_GRID Hillshade/gridsWGS84/Hillshade_WGS84.sgrd		
+gdal_translate -of GTiff Hillshade/gridsWGS84/Hillshade_WGS84.sdat Hillshade/TifsWGS84/Hillshade_WGS84.tif
+
