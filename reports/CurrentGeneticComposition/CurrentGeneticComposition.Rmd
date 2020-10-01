@@ -13,7 +13,6 @@ output:
     highlight: textmate
 ---
 
-
 <style>
 pre {
   overflow-x: auto;
@@ -44,8 +43,9 @@ pre[class] {
 }
 ```
 
+
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=TRUE)
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=TRUE,cache.lazy = FALSE)
 options(width = 300)
 library(knitr)
 library(hierfstat)
@@ -62,9 +62,15 @@ library(dplyr)
 #library(xtable)
 library(tidyverse)
 #library(tibble)
+library(gradientForest)
 library(raster)
 library(sgdm)
+library(adespatial) # to calculate the Moran eigen vectors
 ```
+
+
+<!-- cache.lazy = FALSE is because one of the GF models had a error message and stopped the compilation of the rmarkdown document. -->
+<!-- Here the solution: https://stackoverflow.com/questions/39417003/long-vectors-not-supported-yet-error-in-rmd-but-not-in-r-script -->
 
 
 <!-- Functions & Options used -->
@@ -126,11 +132,10 @@ data <- data[!(data$prov=="ROD"),]
 data
 
 topo <- readRDS(file="../../data/Topography/DfTopoVarbyProv.rds")
-topo <- topo %>% dplyr::select(-contains("ude")) %>% dplyr::rename(curvature=curvature_SRTM,
-                                                                 slope=slope_SRTM,
-                                                                 aspect=aspect_SRTM,
-                                                                 TWI=TWI_SRTM)
+topo <- topo %>% dplyr::select(prov,TRI_WGS84_90m_R) %>% 
+                 dplyr::rename(TRI=TRI_WGS84_90m_R)
 data <- merge(data,topo,by="prov")
+data
 ```
 
 ```{r VizualizeEnvData,fig.height=13,fig.width=13}
@@ -153,9 +158,9 @@ ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +
 ```
 
 
-## Set "AvgSand"
+## Set AvgSand
 
-Topographic variables: `curvature`, `slope`, `aspect`.
+Topographic variable: `TRI`.
 
 Soil variables:
 
@@ -171,14 +176,14 @@ Climatic variables representing episodic events:
 
 
 ```{r SelectEnvDataSetAvgSand,fig.height=6,fig.width=6}
-select.var.AvgSand <- c("bio1","bio2","bio12","bio14","sand_top","depth_roots","aspect","curvature","slope")
+select.var.AvgSand <- c("bio1","bio2","bio12","bio14","sand_top","depth_roots","TRI")
 PlotCors(data,select.var = select.var.AvgSand)
 ```
 
 
-## Set "AvgWater"
+## Set AvgWater
 
-Topographic variables: `curvature`, `slope`, `aspect`.
+Topographic variable: `TRI`.
 
 Soil variables:
 
@@ -194,13 +199,13 @@ Climatic variables representing episodic events:
 
 
 ```{r SelectEnvDataSetAvgWater,fig.height=6,fig.width=6}
-select.var.AvgWater <- c("bio1","bio2","bio12","bio14","water_top","depth_roots","aspect","curvature","slope")
+select.var.AvgWater <- c("bio1","bio2","bio12","bio14","water_top","depth_roots","TRI")
 PlotCors(data,select.var = select.var.AvgWater)
 ```
 
-## Set "ExtSand"
+## Set ExtSand
 
-Topographic variables: `curvature`, `slope`, `aspect`.
+Topographic variable: `TRI`.
 
 Soil variables:
 
@@ -216,14 +221,14 @@ Climatic variables representing episodic events:
   
   
 ```{r SelectEnvDataSetExtSand,fig.height=6,fig.width=6}
-select.var.ExtSand <- c("bio13","bio14","bio5","bio6","sand_top","depth_roots","aspect","curvature","slope")
+select.var.ExtSand <- c("bio13","bio14","bio5","bio6","sand_top","depth_roots","TRI")
 PlotCors(data,select.var = select.var.ExtSand)
 ```
 
 
-## Set "ExtWater"
+## Set ExtWater
 
-Topographic variables: `curvature`, `slope`, `aspect`.
+Topographic variable: `TRI`.
 
 Soil variables:
 
@@ -239,38 +244,20 @@ Climatic variables representing episodic events:
   
   
 ```{r SelectEnvDataSetExtWater,fig.height=6,fig.width=6}
-select.var.ExtWater <- c("bio13","bio14","bio5","bio6","water_top","depth_roots","aspect","curvature","slope")
+select.var.ExtWater <- c("bio13","bio14","bio5","bio6","water_top","depth_roots","TRI")
 PlotCors(data,select.var = select.var.ExtWater)
 ```
 
 
+# Fitting the models
 
-# Maritime pine distribution (mask)
+## GDM analysis
 
-```{r MaritimePineDistriMask}
-# Maritime pine distribution from EUFORGEN (shapefile)
-PinpinDistri  <- shapefile('../../../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/Pinus_pinaster_EUFORGEN.shp')
+
+```{r}
+perf <- data.frame(Set=c("AvgSand","AvgWater","ExtSand","ExtWater"),ExpDev=NA,CV9=NA,CV6=NA,CV2=NA)
 ```
 
-# Hillshade (background)
-
-```{r MapBackground}
-# fond de carte
-# https://land.copernicus.eu/imagery-in-situ/eu-dem/eu-dem-v1-0-and-derived-products/slope?tab=download
-# Need to create an account
-
-# I took the hillsahede map from here:
-# https://www.eea.europa.eu/data-and-maps/data/digital-elevation-model-of-europe
-
-background <- raster("../../data/maps/EuropeanData/hillshade1x1.tif")
-plot(background,col=grayscale_colors, axes=FALSE,legend=F)
-background <- projectRaster(background, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
-background
-e <- extent(-10, 14, 31, 46)
-background <- crop(background, e)
-```
-
-# GDM analysis
 
 > Load the Fst matrix
 
@@ -283,9 +270,9 @@ range(unlist(fstmat[,-1]),na.rm=T)
 sd(unlist(fstmat[,-1]),na.rm=T)
 ```
 
-## Set "AvgSand"
+### Set AvgSand
 
-```{r FormatDataGeoDistSetAvgSand}
+```{r FormatDataGDMAvgSand}
 subdata <- data[,c("prov","latitude","longitude",select.var.AvgSand)]
 
 gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
@@ -293,21 +280,35 @@ gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="lati
 head(gdmTab)
 ```
 
-```{r RunningGDMGeoDistSetAvgSand,fig.height=7,fig.width=7}
+Fit the GDM model:
+
+```{r RunningGDMAvgSand}
+# Running the GDM model:
 gdm.AvgSand <- gdm(gdmTab, geo=T)
 gdm.AvgSand
+```
 
+Let's evaluate the explanatory and predictive performance of the model:
+
+```{r PerfGDMAvgSand}
 # Deviance explained 
-gdm.AvgSand$explained
+perf[perf$Set=="AvgSand","ExpDev"] <- gdm.AvgSand$explained
 
-sum(gdm.AvgSand$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+# sum(gdm.AvgSand$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+# if sum = 0: The algorithm was unable to fit a model to your data. The sum of the spline coefficients = 0 and deviance explained = NULL. Returning NULL object.
 
 # Cross-validation
-sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
-sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
-sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+perf[perf$Set=="AvgSand","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="AvgSand","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="AvgSand","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
 
+perf 
+```
 
+Fitting the I-splines:
+
+```{r IsplinesGDMAvgSand,fig.height=7,fig.width=7,message=F}
+# I-splines
 par(mfrow=c(2,2))
 gdm.AvgSand.splineDat <- isplineExtract(gdm.AvgSand)
 
@@ -368,35 +369,19 @@ plot(gdm.AvgSand.splineDat[[1]][,"depth_roots"],
      ylab="Partial genetic distance",
      ylim=c(0,0.2))
 
-plot(gdm.AvgSand.splineDat[[1]][,"curvature"], 
-     gdm.AvgSand.splineDat[[2]][,"curvature"], 
+plot(gdm.AvgSand.splineDat[[1]][,"TRI"], 
+     gdm.AvgSand.splineDat[[2]][,"TRI"], 
      type="l",
      lwd=3, 
-     xlab="Curvature", 
-     ylab="Partial genetic distance",
-     ylim=c(0,0.2))
-
-plot(gdm.AvgSand.splineDat[[1]][,"aspect"], 
-     gdm.AvgSand.splineDat[[2]][,"aspect"], 
-     type="l",
-     lwd=3, 
-     xlab="Aspect", 
-     ylab="Partial genetic distance",
-     ylim=c(0,0.2))
-
-plot(gdm.AvgSand.splineDat[[1]][,"slope"], 
-     gdm.AvgSand.splineDat[[2]][,"slope"], 
-     type="l",
-     lwd=3, 
-     xlab="Slope", 
+     xlab="Topographic Ruggdness Index", 
      ylab="Partial genetic distance",
      ylim=c(0,0.2))
 ```
 
 
-## Set "AvgWater"
+### Set AvgWater
 
-```{r FormatDataGeoDistSetAvgWater}
+```{r FormatDataGDMAvgWater}
 subdata <- data[,c("prov","latitude","longitude",select.var.AvgWater)]
 
 gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
@@ -404,21 +389,31 @@ gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="lati
 head(gdmTab)
 ```
 
-```{r RunningGDMGeoDistSetAvgWater,fig.height=7,fig.width=7}
+Fit the GDM model:
+
+```{r RunningGDMAvgWater}
+# Running the GDM model:
 gdm.AvgWater <- gdm(gdmTab, geo=T)
 gdm.AvgWater
+```
 
+Let's evaluate the explanatory and predictive performance of the model:
+
+```{r PerfGDMAvgWater,message=F}
 # Deviance explained 
-gdm.AvgWater$explained
-
-sum(gdm.AvgWater$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+perf[perf$Set=="AvgWater","ExpDev"] <- gdm.AvgWater$explained
 
 # Cross-validation
-sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
-sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
-sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+perf[perf$Set=="AvgWater","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="AvgWater","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="AvgWater","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+perf
+```
 
+Fitting the I-splines:
 
+```{r IsplinesGDMAvgWater,fig.height=7,fig.width=7,message=F}
+# I-splines
 par(mfrow=c(2,2))
 gdm.AvgWater.splineDat <- isplineExtract(gdm.AvgWater)
 
@@ -479,35 +474,19 @@ plot(gdm.AvgWater.splineDat[[1]][,"depth_roots"],
      ylab="Partial genetic distance",
      ylim=c(0,0.2))
 
-plot(gdm.AvgWater.splineDat[[1]][,"curvature"], 
-     gdm.AvgWater.splineDat[[2]][,"curvature"], 
+plot(gdm.AvgWater.splineDat[[1]][,"TRI"], 
+     gdm.AvgWater.splineDat[[2]][,"TRI"], 
      type="l",
      lwd=3, 
-     xlab="Curvature", 
-     ylab="Partial genetic distance",
-     ylim=c(0,0.2))
-
-plot(gdm.AvgWater.splineDat[[1]][,"aspect"], 
-     gdm.AvgWater.splineDat[[2]][,"aspect"], 
-     type="l",
-     lwd=3, 
-     xlab="Aspect", 
-     ylab="Partial genetic distance",
-     ylim=c(0,0.2))
-
-plot(gdm.AvgWater.splineDat[[1]][,"slope"], 
-     gdm.AvgWater.splineDat[[2]][,"slope"], 
-     type="l",
-     lwd=3, 
-     xlab="Slope", 
+     xlab="Topographic Ruggdness Index", 
      ylab="Partial genetic distance",
      ylim=c(0,0.2))
 ```
 
 
-## Set "ExtSand"
+### Set ExtSand
 
-```{r FormatDataGeoDistSetExtSand}
+```{r FormatDataGDMExtSand}
 subdata <- data[,c("prov","latitude","longitude",select.var.ExtSand)]
 
 gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
@@ -515,21 +494,32 @@ gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="lati
 head(gdmTab)
 ```
 
-```{r RunningGDMGeoDistSetExtSand,fig.height=7,fig.width=7}
+
+Fit the GDM model:
+
+```{r RunningGDMExtSand}
+# Running the GDM model:
 gdm.ExtSand <- gdm(gdmTab, geo=T)
 gdm.ExtSand
+```
 
+Let's evaluate the explanatory and predictive performance of the model:
+
+```{r PerfGDMExtSand,message=F}
 # Deviance explained 
-gdm.ExtSand$explained
-
-sum(gdm.ExtSand$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+perf[perf$Set=="ExtSand","ExpDev"] <- gdm.ExtSand$explained
 
 # Cross-validation
-sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
-sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
-sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+perf[perf$Set=="ExtSand","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="ExtSand","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="ExtSand","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+perf
+```
 
+Fitting the I-splines:
 
+```{r IsplinesGDMExtSand,fig.height=7,fig.width=7,message=F}
+# I-splines
 par(mfrow=c(2,2))
 gdm.ExtSand.splineDat <- isplineExtract(gdm.ExtSand)
 
@@ -590,36 +580,20 @@ plot(gdm.ExtSand.splineDat[[1]][,"depth_roots"],
      ylab="Partial genetic distance",
      ylim=c(0,0.2))
 
-plot(gdm.ExtSand.splineDat[[1]][,"curvature"], 
-     gdm.ExtSand.splineDat[[2]][,"curvature"], 
+plot(gdm.ExtSand.splineDat[[1]][,"TRI"], 
+     gdm.ExtSand.splineDat[[2]][,"TRI"], 
      type="l",
      lwd=3, 
-     xlab="Curvature", 
-     ylab="Partial genetic distance",
-     ylim=c(0,0.2))
-
-plot(gdm.ExtSand.splineDat[[1]][,"aspect"], 
-     gdm.ExtSand.splineDat[[2]][,"aspect"], 
-     type="l",
-     lwd=3, 
-     xlab="Aspect", 
-     ylab="Partial genetic distance",
-     ylim=c(0,0.2))
-
-plot(gdm.ExtSand.splineDat[[1]][,"slope"], 
-     gdm.ExtSand.splineDat[[2]][,"slope"], 
-     type="l",
-     lwd=3, 
-     xlab="Slope", 
+     xlab="Topographic Ruggdness Index", 
      ylab="Partial genetic distance",
      ylim=c(0,0.2))
 ```
 
 
 
-## Set "ExtWater"
+### Set ExtWater
 
-```{r FormatDataGeoDistSetExtWater}
+```{r FormatDataGDMExtWater}
 subdata <- data[,c("prov","latitude","longitude",select.var.ExtWater)]
 
 gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
@@ -627,21 +601,31 @@ gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="lati
 head(gdmTab)
 ```
 
-```{r RunningGDMGeoDistSetExtWater,fig.height=7,fig.width=7}
+Fit the GDM model:
+
+```{r RunningGDMExtWater}
+# Running the GDM model:
 gdm.ExtWater <- gdm(gdmTab, geo=T)
 gdm.ExtWater
+```
 
+Let's evaluate the explanatory and predictive performance of the model:
+
+```{r PerfGDMExtWater,message=F}
 # Deviance explained 
-gdm.ExtWater$explained
-
-sum(gdm.ExtWater$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+perf[perf$Set=="ExtWater","ExpDev"] <- gdm.ExtWater$explained
 
 # Cross-validation
-sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
-sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
-sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+perf[perf$Set=="ExtWater","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="ExtWater","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="ExtWater","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+perf
+```
 
+Fitting the I-splines:
 
+```{r IsplinesGDMExtWater,fig.height=7,fig.width=7,message=F}
+# I-splines
 par(mfrow=c(2,2))
 gdm.ExtWater.splineDat <- isplineExtract(gdm.ExtWater)
 
@@ -702,27 +686,854 @@ plot(gdm.ExtWater.splineDat[[1]][,"depth_roots"],
      ylab="Partial genetic distance",
      ylim=c(0,0.2))
 
-plot(gdm.ExtWater.splineDat[[1]][,"curvature"], 
-     gdm.ExtWater.splineDat[[2]][,"curvature"], 
+plot(gdm.ExtWater.splineDat[[1]][,"TRI"], 
+     gdm.ExtWater.splineDat[[2]][,"TRI"], 
      type="l",
      lwd=3, 
-     xlab="Curvature", 
-     ylab="Partial genetic distance",
-     ylim=c(0,0.2))
-
-plot(gdm.ExtWater.splineDat[[1]][,"aspect"], 
-     gdm.ExtWater.splineDat[[2]][,"aspect"], 
-     type="l",
-     lwd=3, 
-     xlab="Aspect", 
-     ylab="Partial genetic distance",
-     ylim=c(0,0.2))
-
-plot(gdm.ExtWater.splineDat[[1]][,"slope"], 
-     gdm.ExtWater.splineDat[[2]][,"slope"], 
-     type="l",
-     lwd=3, 
-     xlab="Slope", 
+     xlab="Topographic Ruggdness Index", 
      ylab="Partial genetic distance",
      ylim=c(0,0.2))
 ```
+
+
+
+## GF analysis
+
+> Calculate the Moran's eigenvectors
+
+```{r MoranEigenVectors}
+mem <- data %>% select(latitude,longitude) %>% dbmem
+
+# Merge coordinates and MEM
+mem <- bind_cols(data[,c("prov","latitude","longitude")],mem)
+mem
+```
+
+
+```{r LoadGenoPrepared}
+geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.rds")
+```
+
+Removing the SNPs that are polymorphic in more than 5 populations.
+
+```{r RmMinorAlleleFrequencies}
+vec <- apply(geno[,-1],2,function(x) length(unique(x)))
+vecsup <- vec[vec>5]
+snps <- names(vecsup)
+length(vecsup) # Number of SNPs polymorphic in > 5 populations
+ncol(geno[,-1]) - length(vecsup) # Number of SNPs polymorphic in less than or equal to 5 populations
+genoMAF <- geno %>% dplyr::select(contains(c("prov",snps)))
+```
+
+### Set AvgSand
+
+
+```{r FormatDataGFAvgSand}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgSand)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+kable(df[1:10,1:20])
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelAvgSand,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/GFAvgSand.rds")) 
+```
+
+
+```{r LoadModelAvgSand}
+gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgSand.rds"))
+```
+
+
+```{r PlotOverallImptanceGFAvgSand, fig.height=4,fig.width=8}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFAvgSand,fig.height=4,fig.width=4}
+# Annual daily mean T° (C°)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual daily mean T° (C°)", font=2,cex=0.8)
+
+# Mean diurnal T° range (max-min, °C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Mean diurnal T° range (max-min, °C)", font=2,cex=0.8)
+
+# Annual precipitation (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio12",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Sand content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="sand_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Sand content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+```
+
+
+
+
+### Set AvgWater
+
+
+```{r FormatDataGFAvgWater}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgWater)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+kable(df[1:10,1:20])
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelAvgWater,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/GFAvgWater.rds")) 
+```
+
+
+```{r LoadModelAvgWater}
+gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgWater.rds"))
+```
+
+
+```{r PlotOverallImptanceGFAvgWater, fig.height=4,fig.width=8}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFAvgWater,fig.height=4,fig.width=4}
+# Annual daily mean T° (C°)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual daily mean T° (C°)", font=2,cex=0.8)
+
+# Mean diurnal T° range (max-min, °C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Mean diurnal T° range (max-min, °C)", font=2,cex=0.8)
+
+# Annual precipitation (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio12",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Water content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="water_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Water content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+```
+
+
+
+### Set ExtSand
+
+
+```{r FormatDataGFExtSand}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtSand)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+kable(df[1:10,1:20])
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelExtSand,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/GFExtSand.rds")) 
+```
+
+
+```{r LoadModelExtSand}
+gf <- readRDS(file=paste0("../../outputs/GF/models/GFExtSand.rds"))
+```
+
+
+```{r PlotOverallImptanceGFExtSand, fig.height=4,fig.width=8}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFExtSand,fig.height=4,fig.width=4}
+# Max T° warmest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio5",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Max T° warmest month (°C)", font=2,cex=0.8)
+
+# Min T° of the coldest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio6",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Min T° of the coldest month (°C)", font=2,cex=0.8)
+
+# Precipitation of the wettest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio13",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the wettest month (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Sand content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="sand_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Sand content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+```
+
+
+
+### Set ExtWater
+
+
+```{r FormatDataGFExtWater}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtWater)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+kable(df[1:10,1:20])
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelExtWater,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/GFExtWater.rds")) 
+```
+
+
+```{r LoadModelExtWater}
+gf <- readRDS(file=paste0("../../outputs/GF/models/GFExtWater.rds"))
+```
+
+
+```{r PlotOverallImptanceGFExtWater, fig.height=4,fig.width=8}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFExtWater,fig.height=4,fig.width=4}
+# Max T° warmest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio5",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Max T° warmest month (°C)", font=2,cex=0.8)
+
+# Min T° of the coldest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio6",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Min T° of the coldest month (°C)", font=2,cex=0.8)
+
+# Precipitation of the wettest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio13",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the wettest month (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Water content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="water_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Water content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+```
+
+
+### Test with lat/long
+
+As I can't include in the projection the moran eigen vectors, I'm trying to include the latitude and longitude instead of the Moran eigen vectors.
+
+```{r FormatDataGFAvgWaterGeo}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgWater)]
+
+df <- inner_join(subdata,genoMAF,by="prov")
+kable(df[1:10,1:20])
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("prov","SNP"))) # get climate & lat/long variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelAvgWaterGeo,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("../../outputs/GF/models/GFAvgWaterGeo.rds")) 
+```
+
+
+```{r LoadModelAvgWaterGeo}
+gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgWaterGeo.rds"))
+```
+
+
+```{r PlotOverallImptanceGFAvgWaterGeo, fig.height=4,fig.width=8}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFAvgWaterGeo,fig.height=4,fig.width=4}
+# Latitude
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="latitude",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Latitude", font=2,cex=0.8)
+
+# Longitude
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="longitude",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Longitude", font=2,cex=0.8)
+
+# Annual daily mean T° (C°)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual daily mean T° (C°)", font=2,cex=0.8)
+
+# Mean diurnal T° range (max-min, °C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Mean diurnal T° range (max-min, °C)", font=2,cex=0.8)
+
+# Annual precipitation (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio12",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Water content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="water_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Water content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+```
+
+
+
+# Projecting across the species range
+
+Projections are done with the best set of variables (`AvgWter`): `TRI`, `water_top`, `depth_roots`, `bio1`, `bio2`, `bio12` and `bio14`.
+
+## Load data 
+
+### Maritime pine distribution (mask)
+
+```{r MaritimePineDistriMask}
+# Maritime pine distribution from EUFORGEN (shapefile)
+PinpinDistri  <- shapefile('../../../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/Pinus_pinaster_EUFORGEN.shp')
+```
+
+### Hillshade (background)
+
+```{r MapBackground}
+# fond de carte
+# https://land.copernicus.eu/imagery-in-situ/eu-dem/eu-dem-v1-0-and-derived-products/slope?tab=download
+# Need to create an account
+
+# I took the hillsahede map from here:
+# https://www.eea.europa.eu/data-and-maps/data/digital-elevation-model-of-europe
+
+background <- raster("../../data/maps/EuropeanData/hillshade1x1.tif")
+background <- projectRaster(background, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+e <- extent(-10, 14, 31, 50)
+background <- crop(background, e)
+```
+
+### Rasters of climatic, soil and topographic variables
+
+```{r LoadStackAvgWater}
+stackall <- stack("../../data/StacksEnvVars/StackAvgWater.grd")
+```
+
+
+## GDM
+
+```{r TransformingBeforeProjectionGDMCurrentClimate}
+rastTrans <- gdm.transform(gdm.AvgWater, stackall) 
+
+rastDat <- na.omit(getValues(rastTrans))
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE)
+```
+
+> 1/ Following the GDM vignette
+
+```{r ProjectionGDMCurrentClimate, fig.height=8, fig.width=8}
+pcaRast <- predict(rastTrans, pca, index=1:3)
+
+pcaRast[[1]] <- (pcaRast[[1]]-pcaRast[[1]]@data@min) /
+(pcaRast[[1]]@data@max-pcaRast[[1]]@data@min)*255
+pcaRast[[2]] <- (pcaRast[[2]]-pcaRast[[2]]@data@min) /
+(pcaRast[[2]]@data@max-pcaRast[[2]]@data@min)*255
+pcaRast[[3]] <- (pcaRast[[3]]-pcaRast[[3]]@data@min) /
+(pcaRast[[3]]@data@max-pcaRast[[3]]@data@min)*255
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(pcaRast,add=T,bgalpha=0) 
+```
+
+> Following sciprt from the paper of Fitzpatrick and Keller (2014)
+
+```{r BiplotGDMCurrentClimate, fig.height=8, fig.width=8}
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1 
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackall[[1]]
+
+rasValue <- raster::extract(stackall, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 15
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+
+
+## GF
+
+### Set AvgWater
+
+
+```{r TransformingBeforeProjectionGFCurrentClimate}
+# Load model estimating on the AvgWater set of variables
+gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgWater.rds"))
+
+rasValue <- raster::extract(stackall, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+###
+# This method doesn't work: "Erreur : impossible d'allouer un vecteur de taille 391.6 Go" when trying to calculate the MEM for all values
+# ex.df.coords <- cbind(xyFromCell(stackall,rasValue[,1]),rasValue)
+# ex.df.coords <- ex.df.coords %>% rename(latitude=x,longitude=y)
+# moraneigenvectors <- ex.df.coords %>% select(latitude,longitude) %>% dbmem
+###
+
+# transform env using gf models, see ?predict.gradientForest
+projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+
+# ppcatoraster by hand
+pca <- prcomp(projCur, center=TRUE, scale.=FALSE)
+```
+
+```{r ProjectionGFCurrentClimate, fig.height=8, fig.width=8}
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackall[[1]]
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+# plotRGB(outRast, r = 3, g = 1, b = 2)
+```
+
+> Biplot of the genetic space
+
+```{r BiplotGFCurrentClimate, echo=F}
+nvs <- dim(pca$rotation)[1]
+vec <- names(gf$X)[5:10]
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 40
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+
+
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+
+
+# Show the provenances
+PredsProvs <- predict(gf)
+PCprovs <- predict(pca, PredsProvs)
+points(PCprovs[, 1:2])
+
+# Show the alleles
+SpsWtd <- sweep(gf$Y, 2, apply(gf$Y, 2, min),  "-")
+SpsWtdPCs <- (t(SpsWtd) %*% (PCprovs[, 1:2]))/colSums(SpsWtd)
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 3, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(SpsWtdPCs, pch = ".",cex=3,col="black") # col = alpha("black", 0.4)
+
+# Show some alleles
+snp <- "SNP_0008"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+
+snp <- "SNP_0109"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x10")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*10)
+
+
+snp <- "SNP_6088"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+```
+
+
+### Set test lat/long
+
+
+```{r TransformingBeforeProjectionGFCurrentClimateLatLong}
+# Load model estimating on the test lat/long set of variables
+gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgWaterGeo.rds"))
+
+rasValue <- raster::extract(stackall, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+###
+rasValue <- cbind(xyFromCell(stackall,rasValue[,1]),rasValue)
+rasValue <- rasValue %>% rename(longitude=x,latitude=y)
+###
+
+# transform env using gf models, see ?predict.gradientForest
+projCur <- predict(gf, rasValue[,-3]) # remove cell column before transforming
+
+# ppcatoraster by hand
+pca <- prcomp(projCur, center=TRUE, scale.=FALSE)
+```
+
+```{r ProjectionGFCurrentClimateLatLong, fig.height=8, fig.width=8}
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackall[[1]]
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+```
+
+> Biplot of the genetic space
+
+```{r BiplotGFCurrentClimateLatLong, echo=F}
+nvs <- dim(pca$rotation)[1]
+vec <- names(gf$X)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 40
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+
+
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.2)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+
+
+# Show the provenances
+PredsProvs <- predict(gf)
+PCprovs <- predict(pca, PredsProvs)
+points(PCprovs[, 1:2])
+
+# Show the alleles
+SpsWtd <- sweep(gf$Y, 2, apply(gf$Y, 2, min),  "-")
+SpsWtdPCs <- (t(SpsWtd) %*% (PCprovs[, 1:2]))/colSums(SpsWtd)
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 3, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5) 
+points(SpsWtdPCs, pch = ".",cex=3,col="black") # col = alpha("black", 0.4)
+
+# Show some alleles
+snp <- "SNP_0008"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+
+snp <- "SNP_0109"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x10")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*10)
+
+
+snp <- "SNP_6088"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+```
+
+
+`r knitr::opts_chunk$set(eval = F)`
+
