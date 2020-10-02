@@ -95,6 +95,35 @@ VarImptanceAcrossRange <- function(x){
 ```
 
 
+> Hillshade (background)
+
+```{r GrayScale}
+# Gray scale
+grayscale_colors <- gray.colors(100,            # number of different color levels
+                                start = 0.0,    # how black (0) to go
+                                end = 1.0,      # how white (1) to go
+                                gamma = 2.2,    # correction between how a digital
+                                # camera sees the world and how human eyes see it
+                                alpha = NULL)
+```
+
+```{r MapBackground}
+# fond de carte
+# https://land.copernicus.eu/imagery-in-situ/eu-dem/eu-dem-v1-0-and-derived-products/slope?tab=download
+# Need to create an account
+
+# I took the hillsahede map from here:
+# https://www.eea.europa.eu/data-and-maps/data/digital-elevation-model-of-europe
+
+background <- raster("../../data/maps/EuropeanData/hillshade1x1.tif")
+background <- projectRaster(background, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+e <- extent(-10, 14, 31, 46)
+background <- crop(background, e)
+
+# text(9,32,"Potentiels refuges climatiques\ndes pois chiches\n lors du réchauffement climatique")
+```
+
+
 # BEFORE SELECTION
 
 ## Loading and preparing data
@@ -150,29 +179,6 @@ select.var5 <- c("bio13_prov","bio14_prov","bio5_prov","bio6_prov","sand_top_pro
 
 > Load and prepare genomic data
 
-```{r GenomicDataMunging,eval=F}
-# File with the genotype names (clone names)
-geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
-
-# File with the genotype of each clone for each SNP
-geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
-
-# Removing the first two columns with allele info (A,T, G or C)
-geno <- geno[,3:dim(geno)[[2]]]
-
-# Give the genotype name for each column of geno
-colnames(geno) <- rownames(geno_names)
-
-rm(geno_names)
-
-geno <-  as_tibble(t(geno), rownames = "rownames") %>% 
-  mutate(rownames=str_sub(rownames,1,3)) %>% 
-  dplyr::rename(prov = rownames) %>% 
-  group_by(prov) %>% 
-  summarise_all(~sum(., na.rm = TRUE)/(n()*2))
-
-saveRDS(geno,file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.rds")
-```
 
 ```{r LoadGenoPrepared,echo=F}
 geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.rds")
@@ -635,7 +641,9 @@ rast2[mapCells] <- scalG
 rast3[mapCells] <- scalB
 ##stacks color rasters
 outRast <- stack(rast1, rast2, rast3)
-plotRGB(outRast, r = 1, g = 2, b = 3)
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
 # plotRGB(outRast, r = 3, g = 1, b = 2)
 ```
 
@@ -649,6 +657,15 @@ vind <- rownames(pca$rotation) %in% vec
 scal <- 40
 xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
 yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+
+
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
 points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
 arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
@@ -843,7 +860,9 @@ genOffBS <- sqrt((projCurResWorldClim[,1]-predFut[,1])^2+(projCurResWorldClim[,2
 
 rast.go <- stackall[[1]]
 rast.go[rasValue$cell] <- genOffBS
-plot(rast.go)
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plot(rast.go,add=T,bgalpha=0)
 ```
 
 
@@ -1017,11 +1036,14 @@ DFtot <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanBS=mean,Sd
 ```{r PlotGOSet5BeforeSelectionFutClimAllGCMsSSP370,fig.height=6,fig.width=8}
 rast.go <- stackall[[1]]
 rast.go[rasValue$cell] <- dfGOallGCMs$mean
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
 plot(rast.go,box = FALSE,
      axes = FALSE,
-     alpha=0.8,
+     #alpha=0.8,
       col=colorRampPalette(c("blue","yellow","red"))(255),
-     zlim=c(0,0.1))
+     #zlim=c(0,0.1),
+     add=T,
+     bgalpha=0)
 ```
 
 
