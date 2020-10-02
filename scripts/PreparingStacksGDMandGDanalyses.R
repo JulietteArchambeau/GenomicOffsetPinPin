@@ -7,199 +7,232 @@ library(raster)
 library(stringr)
 
 # Maritime pine distribution from EUFORGEN (shapefile)
-shp  <- shapefile('../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/Pinus_pinaster_EUFORGEN.shp')
+PinpinDistri  <- shapefile('../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/Pinus_pinaster_EUFORGEN.shp')
+
+b <- as(extent(5, 10, 33,37.5), 'SpatialPolygons')
+crs(b) <- crs(PinpinDistri)
+PinpinDistri <- gDifference(PinpinDistri,b)
+plot(PinpinDistri)
+
+#----------------------------------------------------------------------------------------------------------- #
+
+#  I) CURRENT CLIMATE                                                                                        ####
+#     ---------------                                                                                        #
 
 
-# --------------------------------------------------------------------------------------------------------"
+#  A) Set AvgSand                                                                                            ####
+#     -----------                                                                                            #
 
-# >>> CURRENT DATA FOR MAPS ####
 
-#  Climatic rasters - Set 1 ####
+#  Climatic variables ####
+# > from set AvgSand and AvgWater
 grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
-grids <- grids[grepl("bio5_|bio14_|bio12_|bio1_",grids)==T]
-# grids <- c(grids[[1]],grids[[4]],grids[[2]],grids[[3]])
-rast <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
-names(rast) <- c("bio1","bio12","bio14","bio5")
-rast <- mask(rast,shp, updatevalue=NA)
+grids <- grids[grepl("bio1_|bio12_|bio14_|bio2_",grids)==T]
+grids <- c(grids[[1]],grids[[4]],grids[[2]],grids[[3]])
+rast.clim <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
+names(rast.clim) <- c("bio1","bio2","bio12","bio14")
+rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
 
 
-# SRTM altitude raster ####
-rast.alt <- raster("data/Topography/SrtmWGS84/MosaicTif/srtm_mosaic.tif")
-rast.alt <- crop(rast.alt,extent(rast)) # attribute the extent of climatic raster to altitude rasters
-rast.alt <- raster::resample(rast.alt,rast) # same number of cells between the altitude and climatic rasters
-names(rast.alt) <- c("altitude")
-rast.alt <- mask(rast.alt,shp,updatevalue=NA) # keep only cells within maritime pine distribution 
+# TRI raster ####
+# > The models are fitted with TRI values from raster at 90m resolution, and the 
+# projections will be on raster at 1km resolution (to have the same resolution as WorldClim variables).
+rast.tri <- raster("data/Topography/TopoWithR/TRI_WGS84_1km.grd")
+rast.tri <- crop(rast.tri,extent(rast.clim)) # attribute the extent of climatic raster to TRI rasters
+rast.tri <- raster::resample(rast.tri,rast.clim) # same number of cells between the TRI and climatic rasters
+names(rast.tri) <- c("TRI")
+rast.tri <- mask(rast.tri,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
 
 # Soil rasters ####
-stack.soil <- stack("data/soil/STU_EU_T_SAND_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
-names(stack.soil) <- c("sand_top","depth_roots")
-stack.soil <- raster::crop(stack.soil,extent(rast)) # attribute the extent of climatic raster to soil raster
-stack.soil <- raster::resample(stack.soil,rast) # same number of cells between the soil and climatic rasters
-stack.soil <- mask(stack.soil,shp,updatevalue=NA) # keep only cells within maritime pine distribution 
+rast.soil.sand <- stack("data/soil/STU_EU_T_SAND_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+names(rast.soil.sand) <- c("sand_top","depth_roots")
+rast.soil.sand <- raster::crop(rast.soil.sand,extent(rast.clim)) # attribute the extent of climatic raster to soil raster
+rast.soil.sand <- raster::resample(rast.soil.sand,rast.clim) # same number of cells between the soil and climatic rasters
+rast.soil.sand <- mask(rast.soil.sand,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
 
-# >> Save with altitude
-stackall <- stack(rast.alt,rast,stack.soil)
-writeRaster(stackall, filename="data/StacksEnvVars/StackAltSoilClimSet1.grd", format="raster",overwrite=TRUE)
-
-# >> Save without altitude
-stackall <- stack(rast,stack.soil)
-writeRaster(stackall, filename="data/StacksEnvVars/StackSoilClimSet1.grd", format="raster",overwrite=TRUE)
+# >> Merge and save rasters
+stackall <- stack(rast.clim,rast.soil.sand,rast.tri)
+writeRaster(stackall, filename="data/StacksEnvVars/StackAvgSand.grd", format="raster",overwrite=TRUE)
 
 
-#--------------------------------------------------------------------------"
+#----------------------------------------------------------------------------------------------------------- #
+#  B) Set AvgWater                                                                                           ####
+#     -----------                                                                                            #
 
-# Climatic rasters - Set 2 ####
-grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
-grids <- grids[grepl("bio12_|bio1_|ppet.min_|bio6_",grids)==T]
-rast <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
-names(rast) <- c("bio1","bio12","bio6","ppet.min")
-rast <- mask(rast,shp, updatevalue=NA)
+# Soil rasters ####
+rast.soil.water <- stack("data/soil/STU_EU_T_TAWC_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+names(rast.soil.water) <- c("water_top","depth_roots")
+rast.soil.water <- raster::crop(rast.soil.water,extent(rast.clim)) # attribute the extent of climatic raster to soil raster
+rast.soil.water <- raster::resample(rast.soil.water,rast.clim) # same number of cells between the soil and climatic rasters
+rast.soil.water <- mask(rast.soil.water,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
 
-# >> Save with altitude
-stackall <- stack(rast.alt,rast,stack.soil)
-writeRaster(stackall, filename="data/StacksEnvVars/StackAltSoilClimSet2.grd", format="raster",overwrite=TRUE)
-
-# >> Save without altitude
-stackall <- stack(rast,stack.soil)
-writeRaster(stackall, filename="data/StacksEnvVars/StackSoilClimSet2.grd", format="raster",overwrite=TRUE)
+# >> Merge and save rasters
+stackall <- stack(rast.clim,rast.soil.water,rast.tri)
+writeRaster(stackall, filename="data/StacksEnvVars/StackAvgWater.grd", format="raster",overwrite=TRUE)
 
 
-#--------------------------------------------------------------------------"
-
-# Climatic rasters - Set 3 ####
-grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
-grids <- grids[grepl("bio14_|bio1_|ppet.mean_",grids)==T]
-rast <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
-names(rast) <- c("bio1","bio14","ppet.mean")
-rast <- mask(rast,shp, updatevalue=NA)
-
-# >> Save with altitude
-stackall <- stack(rast.alt,rast,stack.soil)
-writeRaster(stackall, filename="data/StacksEnvVars/StackAltSoilClimSet3.grd", format="raster",overwrite=TRUE)
-
-
-#--------------------------------------------------------------------------"
-
-# Climatic rasters - Set 4 ####
-grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
-grids <- grids[grepl("bio14_|bio1_|ppet.mean_|ppet.min",grids)==T]
-rast <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
-names(rast) <- c("bio1","bio14","ppet.mean","ppet.min")
-rast <- mask(rast,shp, updatevalue=NA)
-
-# >> Save without altitude
-stackall <- stack(rast,stack.soil)
-writeRaster(stackall,"data/StacksEnvVars/StackSoilClimSet4.grd", format="raster",overwrite=TRUE)
-
-
-#--------------------------------------------------------------------------"
-
-# Climatic rasters - Set 5 ####
+#----------------------------------------------------------------------------------------------------------- #
+#  C) Set ExtSand                                                                                            ####
+#     -----------                                                                                            #
+  
+#  Climatic variables ####
+# > from set ExtSand and ExtWater
 grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
 grids <- grids[grepl("bio13_|bio14_|bio5_|bio6_",grids)==T]
-rast <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
-names(rast) <- c("bio13","bio14","bio5","bio6")
-rast <- mask(rast,shp, updatevalue=NA)
+rast.clim <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
+names(rast.clim) <- c("bio13","bio14","bio5","bio6")
+rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
+
+# >> Merge and save rasters
+stackall <- stack(rast.clim,rast.soil.sand,rast.tri)
+writeRaster(stackall, filename="data/StacksEnvVars/StackExtSand.grd", format="raster",overwrite=TRUE)
 
 
-# >> Save without altitude
-stackall <- stack(rast,stack.soil)
-writeRaster(stackall,"data/StacksEnvVars/StackSoilClimSet5.grd", format="raster",overwrite=TRUE)
+
+#----------------------------------------------------------------------------------------------------------- #
+#  D) Set ExtWater                                                                                           ####
+#     -----------                                                                                            #
+
+
+# >> Merge and save rasters
+stackall <- stack(rast.clim,rast.soil.water,rast.tri)
+writeRaster(stackall, filename="data/StacksEnvVars/StackExtWater.grd", format="raster",overwrite=TRUE)
 
 
 
-# --------------------------------------------------------------------------------------------------------"
+##############################################################################################################################"
 
-# >>> FUTURE DATA ####
+#  II) FUTURE CLIMATE                                                                                       ####
+#     --------------                                                                                        #
 
+
+#  A) Set AvgWater                                                                                           ####
+#     -----------                                                                                            #
 
 rast.to.crop <- raster("data/climate/Tiff_1901_2009/map_bio1_1901-2009_with_34_sampling_points.tif")
 
 GCMs <- list.files("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/")
 
-# 2041-2060 - SSP370 ####
+
+# 2041-2060 - SSP370 - All GCMs                                                                               ####
 
 for(i in GCMs){
   
-  rast <- stack(paste0("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/",i,"/ssp370/wc2.1_2.5m_bioc_",i,"_ssp370_2041-2060.tif"))
+  rast.clim <- stack(paste0("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/",i,"/ssp370/wc2.1_2.5m_bioc_",i,"_ssp370_2041-2060.tif"))
   
   # I understand that these variables here are the WorldClim bioclimatic variables averaged over the period 2041/2060.
   
-  select.layers <- names(rast)[grepl("2060.13|2060.14|2060.5|2060.6",names(rast))==T]
-  rast <- raster::subset(rast,select.layers)
-  names(rast) <- c("bio5","bio6","bio13","bio14")
-  rast <- rast[[c("bio13","bio14","bio5","bio6")]]
-  rast <- raster::crop(rast,extent(rast.to.crop))
-  rast <- mask(rast,shp, updatevalue=NA)
+  select.layers <- names(rast.clim)[grepl("2060.1$|2060.2|2060.12|2060.14",names(rast.clim))==T]
+  rast.clim <- raster::subset(rast.clim,select.layers)
+  names(rast.clim) <- c("bio1","bio2","bio12","bio14")
+  rast.clim <- rast.clim[[c("bio1","bio2","bio12","bio14")]]
+  rast.clim <- raster::crop(rast.clim,extent(rast.to.crop))
+  rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
   
   
-  # Soil rasters ####
-  stack.soil <- stack("data/soil/STU_EU_T_SAND_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
-  names(stack.soil) <- c("sand_top","depth_roots")
-  stack.soil <- raster::crop(stack.soil,extent(rast)) # attribute the extent of climatic raster to soil raster
-  stack.soil <- raster::resample(stack.soil,rast) # same number of cells between the soil and climatic rasters
-  stack.soil <- mask(stack.soil,shp,updatevalue=NA) # keep only cells within maritime pine distribution 
+  # Soil rasters
+  rast.soil <- stack("data/soil/STU_EU_T_TAWC_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+  names(rast.soil) <- c("water_top","depth_roots")
+  rast.soil <- raster::crop(rast.soil,extent(rast.clim)) # attribute the extent of climatic raster to soil raster
+  rast.soil <- raster::resample(rast.soil,rast.clim) # same number of cells between the soil and climatic rasters
+  rast.soil <- mask(rast.soil,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
+  
+  # TRI raster
+  rast.tri <- raster("data/Topography/TopoWithR/TRI_WGS84_1km.grd")
+  rast.tri <- crop(rast.tri,extent(rast.clim)) # attribute the extent of climatic raster to TRI rasters
+  rast.tri <- raster::resample(rast.tri,rast.clim) # same number of cells between the TRI and climatic rasters
+  names(rast.tri) <- c("TRI")
+  rast.tri <- mask(rast.tri,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
   
   # >> Save without altitude
-  stackall <- stack(rast,stack.soil)
+  stackall <- stack(rast.clim,rast.soil,rast.tri)
+  
   writeRaster(stackall, 
-              filename=paste0("data/StacksEnvVars/FutClimStacks/2041to2060/StackSoilClimSet5_",str_remove_all(i,"-"),".grd"), format="raster",overwrite=TRUE)
+              filename=paste0("data/StacksEnvVars/FutClimStacks/2041to2060/SSP370/StackAvgWater_",str_remove_all(i,"-"),".grd"), format="raster",overwrite=TRUE)
   
 }
 
 
-# 2041-2060 - SSP245 ####
+# 2041-2060 - SSP585 - All GCMs ####
 
-ssp245_2041_2060 <- stack("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/BCC-CSM2-MR/ssp245/wc2.1_2.5m_bioc_BCC-CSM2-MR_ssp245_2041-2060.tif")
+GCMs <- GCMs[!GCMs=="GFDL-ESM4"]
 
-# I understand that these variables here are the WorldClim bioclimatic variables averaged over the period 2041/2060.
+for(i in GCMs){
+  
+  rast.clim <- stack(paste0("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/",i,"/ssp585/wc2.1_2.5m_bioc_",i,"_ssp585_2041-2060.tif"))
+  
+  select.layers <- names(rast.clim)[grepl("2060.1$|2060.2|2060.12|2060.14",names(rast.clim))==T]
+  rast.clim <- raster::subset(rast.clim,select.layers)
+  names(rast.clim) <- c("bio1","bio2","bio12","bio14")
+  rast.clim <- rast.clim[[c("bio1","bio2","bio12","bio14")]]
+  rast.clim <- raster::crop(rast.clim,extent(rast.to.crop))
+  rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
+  
+  
+  # Soil rasters
+  rast.soil <- stack("data/soil/STU_EU_T_TAWC_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+  names(rast.soil) <- c("water_top","depth_roots")
+  rast.soil <- raster::crop(rast.soil,extent(rast.clim)) # attribute the extent of climatic raster to soil raster
+  rast.soil <- raster::resample(rast.soil,rast.clim) # same number of cells between the soil and climatic rasters
+  rast.soil <- mask(rast.soil,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
+  
+  # TRI raster
+  rast.tri <- raster("data/Topography/TopoWithR/TRI_WGS84_1km.grd")
+  rast.tri <- crop(rast.tri,extent(rast.clim)) # attribute the extent of climatic raster to TRI rasters
+  rast.tri <- raster::resample(rast.tri,rast.clim) # same number of cells between the TRI and climatic rasters
+  names(rast.tri) <- c("TRI")
+  rast.tri <- mask(rast.tri,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
+  
+  # >> Save without altitude
+  stackall <- stack(rast.clim,rast.soil,rast.tri)
+  
+  writeRaster(stackall, 
+              filename=paste0("data/StacksEnvVars/FutClimStacks/2041to2060/SSP585/StackAvgWater_",str_remove_all(i,"-"),".grd"), format="raster",overwrite=TRUE)
+  
+}
 
-select.layers <- names(ssp245_2041_2060)[grepl("2060.13|2060.14|2060.5|2060.6",names(ssp245_2041_2060))==T]
-rast <- raster::subset(ssp245_2041_2060,select.layers)
-names(rast) <- c("bio5","bio6","bio13","bio14")
-rast <- rast[[c("bio13","bio14","bio5","bio6")]]
-rast <- raster::crop(rast,extent(rast.to.crop))
-rast <- mask(rast,shp, updatevalue=NA)
 
 
-# Soil rasters ####
-stack.soil <- stack("data/soil/STU_EU_T_SAND_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
-names(stack.soil) <- c("sand_top","depth_roots")
-stack.soil <- raster::crop(stack.soil,extent(rast)) # attribute the extent of climatic raster to soil raster
-stack.soil <- raster::resample(stack.soil,rast) # same number of cells between the soil and climatic rasters
-stack.soil <- mask(stack.soil,shp,updatevalue=NA) # keep only cells within maritime pine distribution 
+##############################################################################################################################"
 
-# >> Save without altitude
-stackall <- stack(rast,stack.soil)
-writeRaster(stackall, filename="data/StacksEnvVars/FutClimStackSoilClimSet5.grd", format="raster",overwrite=TRUE)
+#  III) CURRENT DATA FOR GENOMIC OFFSET CALCULATION                                                          ####
+#       -------------------------------------------                                                          #
 
 
-# --------------------------------------------------------------------------------------------------------"
+#  A) Set AvgWater                                                                                           ####
+#     -----------                                                                                            #
 
-# >>> CURRENT DATA FOR GENOMIC OFFSET CALCULATION ####
 
-rast.to.crop <- stack("data/StacksEnvVars/FutClimStacks/2041to2060/StackSoilClimSet5_BCCCSM2MR.grd")
 
-# Climatic rasters - Set 5 ####
+rast.to.crop <- stack("data/StacksEnvVars/FutClimStacks/2041to2060/SSP585/StackAvgWater_BCCCSM2MR.grd")
+
+# Climatic rasters ####
 grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
-grids <- grids[grepl("bio13_|bio14_|bio5_|bio6_",grids)==T]
-rast <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
-names(rast) <- c("bio13","bio14","bio5","bio6")
-rast <- raster::crop(rast,extent(rast.to.crop))
-rast <- raster::resample(rast,rast.to.crop)
-rast <- mask(rast,shp, updatevalue=NA)
+grids <- grids[grepl("bio1_|bio2_|bio12_|bio14_",grids)==T]
+grids <- c(grids[[1]],grids[[4]],grids[[2]],grids[[3]])
+rast.clim <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
+names(rast.clim) <- c("bio1","bio2","bio12","bio14")
+rast.clim <- raster::crop(rast.clim,extent(rast.to.crop))
+rast.clim <- raster::resample(rast.clim,rast.to.crop)
+rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
 
 # Soil rasters ####
-stack.soil <- stack("data/soil/STU_EU_T_SAND_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
-names(stack.soil) <- c("sand_top","depth_roots")
-stack.soil <- raster::crop(stack.soil,extent(rast)) # attribute the extent of climatic raster to soil raster
-stack.soil <- raster::resample(stack.soil,rast) # same number of cells between the soil and climatic rasters
-stack.soil <- mask(stack.soil,shp,updatevalue=NA) # keep only cells within maritime pine distribution 
+rast.soil <- stack("data/soil/STU_EU_T_TAWC_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+names(rast.soil) <- c("water_top","depth_roots")
+rast.soil <- raster::crop(rast.soil,extent(rast.clim)) # attribute the extent of climatic raster to soil raster
+rast.soil <- raster::resample(rast.soil,rast.clim) # same number of cells between the soil and climatic rasters
+rast.soil <- mask(rast.soil,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
 
-# >> Save without altitude
-stackall <- stack(rast,stack.soil)
-writeRaster(stackall, filename="data/StacksEnvVars/CurStacksResWorldClim/StackSoilClimSet5ResWorldClim.grd", 
+# TRI raster ####
+rast.tri <- raster("data/Topography/TopoWithR/TRI_WGS84_1km.grd")
+rast.tri <- crop(rast.tri,extent(rast.clim)) # attribute the extent of climatic raster to TRI rasters
+rast.tri <- raster::resample(rast.tri,rast.clim) # same number of cells between the TRI and climatic rasters
+names(rast.tri) <- c("TRI")
+rast.tri <- mask(rast.tri,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
+
+
+stackall <- stack(rast.clim,rast.soil,rast.tri)
+writeRaster(stackall, filename="data/StacksEnvVars/CurStacksResWorldClim/StackAvgWaterResWorldClim.grd", 
             format="raster",
             overwrite=TRUE)
-
 
