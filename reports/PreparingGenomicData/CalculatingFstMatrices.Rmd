@@ -1,0 +1,209 @@
+---
+title: "Calculating the Fst Matrices"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+---
+
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=TRUE)
+options(width = 300)
+library(knitr)
+library(hierfstat)
+library(reshape2)
+library(ggbiplot)
+library(gdm)
+#library(cowplot)
+#library(ggplot2)
+#library(ggpubr)
+#library(stringi)
+library(beepr)
+library(dplyr)
+#library(devtools)
+#library(xtable)
+library(tidyverse)
+#library(tibble)
+library(raster)
+library(sgdm)
+```
+
+To calculate the Fst matrix, we use **Weir and Cockerham method**. 
+
+
+```{r  LoadFilesAndFormat}
+# File with the genotype names (clone names)
+geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
+
+# File with the genotype of each clone for each SNP
+geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
+str(geno[,1:20])
+dim(geno) # SNPs in rows, genotypes in columns
+
+# In this file, SNPs have their names, but not the genotypes.
+head(geno[,1:10])
+
+# Removing the first two columns with allele info (A,T, G or C)
+geno <- geno[,3:dim(geno)[[2]]]
+
+# Give the genotype name for each column of geno
+colnames(geno) <- rownames(geno_names)
+
+rm(geno_names)
+
+head(geno[,1:10])
+dim(geno)
+unique(unlist(geno))
+```
+
+<!-- I followed the example in the package 'hierfstats' to format the dataset. Here is the exemple of the package hierfstats: -->
+
+```{r HierfstatsExample, eval=F,echo=F}
+data(gtrunchier)
+head(gtrunchier)
+pairwise.WCfst(gtrunchier[,-2],diploid=TRUE)
+```
+
+```{r  PrepareData}
+geno[geno ==1] <- 12
+geno[geno ==2] <- 22
+geno[geno ==0] <- 11
+geno <- t(geno) # SNps in column and genotypes in row
+geno <- as.data.frame(geno)
+geno$prov <- substr(row.names(geno), 0, 3)
+geno <- geno %>% dplyr::select(prov, everything())
+geno[1:10,1:10]
+dim(geno)
+```
+
+
+# Before selection (initial alleles frequencies)
+
+```{r ComputeFstMatrixBS}
+# fst <- pairwise.WCfst(geno,diploid=TRUE)
+# saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawBS.rds")
+fst <- readRDS(file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawBS.rds")
+```
+
+4 Fst values have very very small negative values. We set them to 0.
+
+```{r NegValuestoZeroFstMatrix}
+fst[which(fst <0)]
+fst[which(fst <0)] <- 0
+round(fst,2)
+fst
+# saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34ProvsBS.rds")
+```
+
+```{r visualizeMatrixFst, fig.height=20,fig.width=20}
+source("../../scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+p.mat <- corpmat(fst)
+
+corrplot::corrplot(fst, method="color", col=col(200),
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=23, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.05, insig = "blank", number.cex =0.8,tl.cex = 0.8,
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+```
+
+
+# After selection in Madrid and Caceres (wrong approach, to change)
+
+```{r ExtractGenotypeNamesCacMad, eval=F}
+geno.names.sub <- readRDS(file="../../data/PreparedDFforGDMandGF/GenotypesToBeKeptAfterSelection/ListASCacMad.rds")
+
+# How many genotypes?
+length(geno.names.sub)
+
+# Select only genotypes which has at least one survivor
+geno <- geno[geno.names.sub,]
+dim(geno)
+
+fst <- pairwise.WCfst(geno,diploid=TRUE)
+saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawASCacMad.rds")
+```
+
+
+4 Fst values have very very small negative values. We set them to 0.
+
+```{r NegValuestoZeroFstMatrixCacMad,eval=F}
+fst <- readRDS(file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawASCacMad.rds")
+fst[which(fst <0)]
+fst[which(fst <0)] <- 0
+round(fst,2)
+# saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34ProvsASCacMad.rds")
+```
+
+
+
+# After selection in Caceres (wrong approach, to change)
+
+```{r ExtractGenotypeNamesCacOnly, eval=F}
+geno.names.sub <- readRDS(file="../../data/PreparedDFforGDMandGF/GenotypesToBeKeptAfterSelection/ListASCacOnly.rds")
+
+# How many genotypes?
+length(geno.names.sub)
+
+# Select only genotypes which has at least one survivor
+geno <- geno[geno.names.sub,]
+dim(geno)
+fst <- pairwise.WCfst(geno,diploid=TRUE)
+saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawASCacOnly.rds")
+```
+
+```{r NegValuestoZeroFstMatrixCacOnly,eval=F}
+fst <- readRDS(file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165SnpsRawASCacOnly.rds")
+fst[which(fst <0)]
+fst[which(fst <0)] <- 0
+round(fst,2)
+heatmap(fst)
+# saveRDS(fst,file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34ProvsASCacOnly.rds")
+```
+
+
+16 Fst values have very very small negative values. We set them to 0.
+
+

@@ -1,0 +1,83 @@
+---
+title: "Building allele frequency matrices for GF"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+---
+
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=T)
+options(width = 300)
+library(knitr)
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(adespatial)
+library(vegan)
+```
+
+
+
+```{r GenomicDataMunging,eval=F}
+# File with the genotype names (clone names)
+geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
+
+# File with the genotype of each clone for each SNP
+geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
+
+# Removing the first two columns with allele info (A,T, G or C)
+geno <- geno[,3:dim(geno)[[2]]]
+
+# Give the genotype name for each column of geno
+colnames(geno) <- rownames(geno_names)
+
+rm(geno_names)
+
+geno <-  as_tibble(t(geno), rownames = "rownames") %>% 
+  mutate(rownames=str_sub(rownames,1,3)) %>% 
+  dplyr::rename(prov = rownames) %>% 
+  group_by(prov) %>% 
+  summarise_all(~sum(., na.rm = TRUE)/(n()*2))
+
+saveRDS(geno,file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.rds")
+```
+
