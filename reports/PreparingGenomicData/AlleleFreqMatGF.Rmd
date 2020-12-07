@@ -1,5 +1,5 @@
 ---
-title: "Building allele frequency matrices for GF"
+title: "Calculatig provenance allele frequencies for GF analyses"
 author: "Juliette Archambeau"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
@@ -11,6 +11,8 @@ output:
        collapsed: false
     number_sections: true
     highlight: textmate
+editor_options: 
+  chunk_output_type: console
 ---
 
 
@@ -45,24 +47,27 @@ pre[class] {
 ```
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(cache=T)
+knitr::opts_chunk$set(cache=F)
 options(width = 300)
 library(knitr)
 library(plyr)
 library(dplyr)
 library(tidyverse)
 library(adespatial)
+library(kableExtra)
 library(vegan)
 ```
 
-# All SNPs
+Like for the calculation of the pairwise FST, **no imputation of the missing data was done here.**
+
+# Using the whole genomic dataset
 
 ```{r GenomicDataMunging,eval=F}
 # File with the genotype names (clone names)
-geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
+geno_names <- read.delim2("data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
 
 # File with the genotype of each clone for each SNP
-geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
+geno <- read.csv("data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
 
 # Removing the first two columns with allele info (A,T, G or C)
 geno <- geno[,3:dim(geno)[[2]]]
@@ -76,19 +81,30 @@ geno <-  as_tibble(t(geno), rownames = "rownames") %>%
   mutate(rownames=str_sub(rownames,1,3)) %>% 
   dplyr::rename(prov = rownames) %>% 
   group_by(prov) %>% 
-  summarise_all(~sum(., na.rm = TRUE)/(n()*2))
+  summarise_all(~sum(., na.rm = TRUE)/((n()-sum(is.na(.)))*2))
 
-saveRDS(geno,file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.rds")
+  # summarise_all(~sum(., na.rm = TRUE)/(n()*2)) # Previous line that was false because I divided the count of alleles of interest by the total count of allele genotyped in the provenance without taking into account the missing values.
+
+saveRDS(geno,file="data/PreparedDFforGDMandGF/GF/ProvAllelFrequenciesAllSNPs.rds")
 ```
 
-# Candidate SNPs
+```{r VisualizeMatrix}
+geno <- readRDS(file="data/PreparedDFforGDMandGF/GF/ProvAllelFrequenciesAllSNPs.rds")
+geno[1:34,1:20] %>%
+  kable(digits=3) %>%  
+  kable_styling(font_size = 11,bootstrap_options = c("stripped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+
+#  Using the candidate SNPs 
 
 ```{r GenomicDataMungingCand,eval=F}
 # File with the genotype names (clone names)
-geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
+geno_names <- read.delim2("data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
 
 # File with the genotype of each clone for each SNP
-geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
+geno <- read.csv("data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
 
 # Removing the first two columns with allele info (A,T, G or C)
 geno <- geno[,3:dim(geno)[[2]]]
@@ -99,14 +115,17 @@ colnames(geno) <- rownames(geno_names)
 rm(geno_names)
 
 # Load candidate SNPs
-cand <- readRDS(file="../../outputs/CandidateSNPs/183SNPsRDA.rds")
+cand <- readRDS(file="outputs/CandidateSNPs/???")
+
+# Keep only candidate SNPs
+geno <- geno[rownames(geno) %in% cand$snp,]
 
 geno <-  as_tibble(t(geno), rownames = "rownames") %>% 
   mutate(rownames=str_sub(rownames,1,3)) %>% 
   dplyr::rename(prov = rownames) %>% 
   group_by(prov) %>% 
-  summarise_all(~sum(., na.rm = TRUE)/(n()*2))
+  summarise_all(~sum(., na.rm = TRUE)/((n()-sum(is.na(.)))*2))
 
-saveRDS(geno,file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequenciesCandidateSNPs.rds")
+saveRDS(geno,file="data/PreparedDFforGDMandGF/GF/ProvAllelFrequenciesCandidateSNPs.rds")
 ```
 
