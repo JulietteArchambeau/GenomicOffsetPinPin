@@ -815,7 +815,7 @@ mean(gf$result)
 sd(gf$result)
 ```
 
-```{r PlotCumulativeImptanceGFAvgSand,fig.height=4,fig.width=4,cache=TRUE}
+```{r PlotCumulativeImptanceGFAvgSand,fig.height=4,fig.width=4,cache=TRUE,fig.show="hold", out.width="33%"}
 # MEM 1
 plot(gf, plot.type="Cumulative.Importance",
      imp.vars="MEM1",
@@ -929,7 +929,7 @@ mean(gf.mem$result)
 sd(gf.mem$result)
 ```
 
-```{r PlotCumulativeImptanceGFAvgWater,cache=TRUE,fig.height=4,fig.width=4}
+```{r PlotCumulativeImptanceGFAvgWater,cache=TRUE,fig.height=4,fig.width=4,fig.show="hold", out.width="33%"}
 # MEM 1
 plot(gf, plot.type="Cumulative.Importance",
      imp.vars="MEM1",
@@ -1042,7 +1042,7 @@ mean(gf$result)
 sd(gf$result)
 ```
 
-```{r PlotCumulativeImptanceGFExtSand,fig.height=4,fig.width=4,cache=TRUE}
+```{r PlotCumulativeImptanceGFExtSand,fig.height=4,fig.width=4,cache=TRUE,fig.show="hold", out.width="33%"}
 # MEM 1
 plot(gf, plot.type="Cumulative.Importance",
      imp.vars="MEM1",
@@ -1155,7 +1155,7 @@ mean(gf$result)
 sd(gf$result)
 ```
 
-```{r PlotCumulativeImptanceGFExtWater,fig.height=4,fig.width=4,cache=TRUE}
+```{r PlotCumulativeImptanceGFExtWater,fig.height=4,fig.width=4,cache=TRUE,fig.show="hold", out.width="33%"}
 # MEM 1
 plot(gf, plot.type="Cumulative.Importance",
      imp.vars="MEM1",
