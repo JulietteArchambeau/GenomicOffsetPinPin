@@ -1,0 +1,2562 @@
+---
+title: 'Univariate genetic-environment association: <span style="font-variant:small-caps;">BayPass</span>'
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+bibliography: references.bib 
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)
+library(vegan)  # to investigate correlations among predictors
+library(psych)  # to plot the pairs panels
+library(tidyverse)
+library(corrplot)
+library(kableExtra)
+```
+
+```{r BayPassUtils}
+source("~/Bureau/baypass_2.2/utils/baypass_utils.R")
+```
+
+In this document, we test on our data the different models proposed by <span style="font-variant:small-caps;">BayPass</span>. The results appeared to be the most robust with the important sampling models. Even if nothing was said in the <span style="font-variant:small-caps;">BayPass</span> manual on whether we should run IS one covariate at a time or not, we decided to do so. So, the scripts that were used for the paper are at the end of this document (section: `IS with one covariate at a time`).
+
+# Download <span style="font-variant:small-caps;">BayPass</span>
+
+I downloaded [here](http://www1.montpellier.inra.fr/CBGP/software/baypass/download.html) the version 2.2 of <span style="font-variant:small-caps;">BayPass</span>.
+
+I extracted the `tar.gz` file in `~/Bureau` with:
+
+```{bash ExtractBayPasstargz, eval=F}
+cd ~/Bureau/
+tar -zxvf baypass_2.2.tar.gz
+```
+
+To compile <span style="font-variant:small-caps;">BayPass</span>, I used the gfortran free compiler (the command should automatically produce an executable called `g_baypass`).
+
+```{bash CompileBaypass, eval=F}
+cd baypass_2.2/sources/
+make clean all FC=gfortran
+```
+
+To execute <span style="font-variant:small-caps;">BayPass</span>, e.g. here the `help` command:
+
+```{bash}
+cd ~/Bureau/baypass_2.2/sources
+./g_baypass -help
+```
+
+
+# Format data
+ 
+## Genomic data
+
+We load the genomic dataset of 5,165 SNPs and 523 genotypes, with imputation of the missing values by using the most common allele at each SNP within the main gene pool this genotype belongs to.
+
+```{r LoadGenomicData}
+geno <- readRDS(file="data/GenomicData/5165snps523genotypesImpNA.rds")
+dim(geno)
+geno[1:10,1:10]
+```
+
+The genomic data for <span style="font-variant:small-caps;">BayPass</span> needs to be allele counts for each SNP in each of the provenance. 
+
+```{r CalculateAlleleCounts, eval=F}
+count.2nd.allele = function(x) {2*length(x)-sum(x)}
+stats = c('sum', 'count.2nd.allele')
+
+df <- geno %>% mutate(prov=str_sub(row.names(geno),1,3)) %>% 
+  select(prov,everything()) %>% 
+  group_by(prov) %>% 
+  dplyr::summarize_all(.funs=stats)  # very long
+
+saveRDS(df,file="outputs/CandidateSNPs/baypass/PreFile_5165snps523genotypesImpNABayPass.rds")
+```
+
+```{r ArrangeAlleleCountsFroBayPass}
+df <- readRDS(file="outputs/CandidateSNPs/baypass/PreFile_5165snps523genotypesImpNABayPass.rds")
+
+dfsum1 <- df %>%  select(contains("sum")) %>%  t() # count of the first allele
+dfsum2 <- df %>%  select(contains("count")) %>% t() # count of the second allele
+
+colnames(dfsum2) <- colnames(dfsum1) <- df$prov
+colnames(dfsum1) <- paste0(df$prov,"1")
+colnames(dfsum2) <- paste0(df$prov,"2")
+
+rownames(dfsum1) <- str_sub(rownames(dfsum1),1,-5)
+rownames(dfsum2) <- str_sub(rownames(dfsum2),1,-18)
+
+identical(rownames(dfsum1), rownames(dfsum2)) 
+DF <- cbind(dfsum1,dfsum2) %>% as_tibble %>% 
+  select(sort(tidyselect::peek_vars()))
+
+DF[1:10,1:10] %>% kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+```{r SaveDF, eval=F}
+write.table(DF, file = "outputs/CandidateSNPs/baypass/5165snps523genotypesImpNABayPass", sep = " ",
+            row.names = FALSE, col.names = FALSE) # works either with .txt or no extension
+```
+
+## Environmental data
+
+**Initially, we ran the GEAs analyses (<span style="font-variant:small-caps;">BayPass</span> and RDA) on one set of environmental variables (set `AvgWater`). So, most of this document is focused on this set of variables (notably when the variables are included together in the models). Nevertheless, we decided after a while to run also the GEAs for other variables we were interested in (`sand_top`, 'bio5`, `bio6` and `bio13`). So, at the end of the document, IS (one covariate at a time) is also ran for these variables.**
+
+### Set AvgWater
+
+Topographic variable: `TRI`.
+
+Soil variables:
+
+  - `water_top` = Total available water content
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing average climatic conditions:
+
+  - `bio1`: annual daily mean temperature (°C)
+  - `bio2`: mean diurnal temperature range (max-min, °C)
+  - `bio12`: annual precipitation (mm)
+  - `bio14`: precipitation of the driest month (mm)
+
+```{r LoadEnvData,fig.height=10,fig.width=16}
+select.env <- c("bio1","bio2","bio12","bio14","water_top","depth_roots","TRI")
+
+env <- readRDS(file="data/AllDataPhenoClimSoil.RDS")
+env <- env %>% select(prov,contains("bio"),contains("top_prov"),"depth_roots_prov")
+colnames(env) <- c("prov",str_sub(grep("_prov",colnames(env),value=TRUE),1,-6))
+env <- unique(env)
+env <- env[!(env$prov=="ROD"),]
+topo <- readRDS(file="data/Topography/DfTopoVarbyProv.rds")
+topo <- topo %>% dplyr::select(prov,TRI_WGS84_90m_R) %>% 
+                 dplyr::rename(TRI=TRI_WGS84_90m_R)
+
+env <- left_join(env,topo,by="prov") %>% select(prov,all_of(select.env))
+
+identical(rownames(env$prov), rownames(df$prov)) # provenances are in the same order as in the genomic data
+
+# Format for BayPass
+DFenv <- env %>% dplyr::select(-prov) %>%  t() %>% round(3)
+DFenv
+```
+
+```{r SaveDFenv, eval=F}
+write.table(DFenv, file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPass", sep = " ",
+            row.names = FALSE, col.names = FALSE) # works either with .txt or no extension
+
+# One covariate at a time
+write.table(as.data.frame(t(DFenv[1,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassBio1", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+write.table(as.data.frame(t(DFenv[2,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassBio2", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+write.table(as.data.frame(t(DFenv[3,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassBio12", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+write.table(as.data.frame(t(DFenv[4,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassBio14", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+write.table(as.data.frame(t(DFenv[5,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassWaterTop", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+write.table(as.data.frame(t(DFenv[6,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassDepthRoots", sep = " ",
+            row.names = FALSE, col.names = FALSE) # works either with .txt or no extension
+write.table(as.data.frame(t(DFenv[7,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassTRI", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+```
+
+### Other variables
+
+```{r OtherEnvData,fig.height=10,fig.width=16}
+select.other.env <- c("bio5","bio6","bio13","sand_top")
+
+env <- readRDS(file="data/AllDataPhenoClimSoil.RDS")
+env <- env %>% select(prov,contains("bio"),contains("top_prov"))
+colnames(env) <- c("prov",str_sub(grep("_prov",colnames(env),value=TRUE),1,-6))
+env <- unique(env)
+env <- env[!(env$prov=="ROD"),]
+topo <- readRDS(file="data/Topography/DfTopoVarbyProv.rds")
+topo <- topo %>% dplyr::select(prov,TRI_WGS84_90m_R) %>% 
+                 dplyr::rename(TRI=TRI_WGS84_90m_R)
+
+env <- left_join(env,topo,by="prov") %>% select(prov,all_of(select.other.env))
+
+identical(rownames(env$prov), rownames(df$prov)) # provenances are in the same order as in the genomic data
+
+# Format for BayPass
+DFenv <- env %>% dplyr::select(-prov) %>%  t() %>% round(3)
+DFenv
+
+write.table(as.data.frame(t(DFenv[1,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassBio5", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+write.table(as.data.frame(t(DFenv[2,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassBio6", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+write.table(as.data.frame(t(DFenv[3,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassBio13", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+write.table(as.data.frame(t(DFenv[4,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassSandTop", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+```
+
+# Estimating the popupation covariance matrix
+
+We estimate the (scaled) covariance matrix of population allele frequencies $\Omega$ resulting from their (possibly unknown and complex) shared history. For that, we ran an analysis under the core model mode of <span style="font-variant:small-caps;">BayPass</span>. According to <span style="font-variant:small-caps;">BayPass</span> manual, "The core model depicted in Figure 1A might be viewed as a generalization
+of the model proposed by Nicholson *et al*. (2002) and was first proposed by Coop et al. (2010)." Here is the **Figure 1A from the <span style="font-variant:small-caps;">BayPass</span> manual:**
+
+![](CoreModelBayPass.png)
+
+
+```{bash EstimeOmega, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass
+~/Bureau/baypass_2.2/sources/g_baypass -gfile 5165snps523genotypesImpNABayPass -outprefix anacore
+```
+
+
+Let's visualize the results.
+
+```{r VisualizeOmega, fig.height=8,fig.width=8}
+#upload the estimated Omega matrix
+omega=as.matrix(read.table("outputs/CandidateSNPs/baypass/anacore_mat_omega.out"))
+prov.names <- df$prov
+dimnames(omega)=list(prov.names,prov.names)
+
+# Visualization of the matrix
+# Using SVD decomposition
+plot.omega(omega=omega,pop.names=prov.names)
+
+# as a correlation plot
+cor.mat=cov2cor(omega)
+corrplot(cor.mat,method="color",mar=c(2,1,2,2)+0.1,
+main=expression("Correlation map based on"~hat(Omega)))
+
+# as a heatmap and hierarchical clustering tree (using the average agglomeration method)
+hclust.ave <- function(x) hclust(x, method="average")
+heatmap(1-cor.mat,hclustfun = hclust.ave,
+main=expression("Heatmap of "~hat(Omega)~"("*d[ij]*"=1-"*rho[ij]*")"))
+```
+
+> XtX statistics to identify outlier loci in genome–scan of adaptive differentiation
+
+**From <span style="font-variant:small-caps;">BayPass</span> manual:** "The core model allows scanning the genome for differentiation (covariate-free) using the **$XtX$ statistics** as introduced by @gunther2013robust which is computed by default in BayPass. The main advantage of this approach is to **explicitly account for the covariance structure in population allele frequencies** (via estimating $\Omega$) resulting from the demographic history of the populations."
+
+**From @gunther2013robust:** "Thus $X^{t}X$ is directly analogous to $F_{ST}$ , but it accounts for the variance–covariance structure of the populations in question. [...] This suggests that $X_{l}^{T}X_{l}$ is a natural test statistic to identify loci that deviate away strongly from the multivariate normal distribution, e.g., due to selection. Furthermore, this form naturally accounts for hierarchical population structure or other models of population structure that can confound $F_{ST}$-style outlier analyses (Excoffier et al. 2009). As we do not observe $X_{l}$ and rather obtained a posterior distribution of $X_{l}$, we take the average $X_{l}^{T}X_{l}$ across the sample of $X_{l}$ from our MCMC (we term this $X^{t}X$)."
+
+```{r VisualizeXtX, fig.height=8,fig.width=14}
+xtx <- read.table("outputs/CandidateSNPs/baypass/anacore_summary_pi_xtx.out",h=T)
+layout(matrix(1:2,2,1))
+plot(xtx$M_XtX,xlab="SNP",ylab="mean(XtX)",main="Posterior mean of the XtX statistics")
+plot(xtx$SD_XtX,xlab="SNP",ylab="sd(XtX)",main="Posterior standard deviation of the XtX statistics")
+
+#check behavior of the p-values associated to the XtXst estimator
+abline(h=1)
+layout(matrix(1:3,3,1))
+hist(10**(-1*xtx$log10.1.pval.),freq=F,breaks=50,main="")
+plot(xtx$XtXst,main="XtXst calibrated estimator of the XtX statistic",ylab="XtXst")
+plot(xtx$log10.1.pval.,main="P-value (-log10 scale) of the XtXst calibrator",ylab="p-values")
+abline(h=3,lty=2) #0.001 p--value theshold
+```
+
+**From <span style="font-variant:small-caps;">BayPass</span> manual:** "If the p–values are not well behaved, one may rather consider calibrating the $XtX$ statistics with PODs. In addition, it should be noticed that for the $XtX$ statistics, the p-values are computed assuming a bilateral test. Hence, one may check the $XtX$ value to distinguish positive (high $XtX$) from balancing (small $XtX$) selection."
+
+
+# The standard covariate model
+
+<span style="color: red;">Comment: should we remove the MAF for these models?</span>
+
+The standard covariate model is represented in the following figure (**Figure 1B from the <span style="font-variant:small-caps;">BayPass</span> the manual**):
+
+![](StandardModelBayPass.png)
+
+According to <span style="font-variant:small-caps;">BayPass</span> manual, "This model allows evaluating to which extent a population covariable $k$ is (linearly) associated with each marker $i$ (which are assumed independent given $\Omega$) by the introduction of the regression coefficients $\beta_{ik}$ (for convenience the indices $k$ for covariables are dropped in Figure 1B)."
+
+
+## Importance sampling covariate model
+
+**From <span style="font-variant:small-caps;">BayPass</span> manual:** "Importance Sampling (IS) approximation allows estimating Bayes Factor to evaluate the support in favor of association of each SNP $i$ with a covariable $k$, i.e., to compare the model with association ($\beta_{ik} \neq 0$) against the null model ($\beta_{ik} = 0$). The IS based estimation was initially proposed by Coop et al. (2010) and is based on a numerical integration that requires the definition of a grid covering the whole support of the $\beta_{ik}$ prior distribution. In <span style="font-variant:small-caps;">BayPass</span>, the grid consists of $n_{\beta}$ (by default $n_{\beta} = 201$) equidistant points from $\beta_{min}$ to $\beta_{max}$ (including the boundaries) leading to a lag between two successive values equal to $\frac{\beta_{max}-\beta_{min}}{n_{\beta}-1}$ (i.e., 0.003 with default values). Other values for $n_{\beta}$ might be supplied by the user with the `-nbetagrid` option."
+
+```{bash ISCovariateModel, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile 5165snps523genotypesImpNABayPass \
+    -efile EnvVariablesBayPass \
+    -omegafile anacore_mat_omega.out \
+    -outprefix anacovis
+```
+
+We did not specify the `-seed` option, by default it is 5001.
+
+```{r PlotsISCovariateModel, fig.height=10,fig.width=14}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/anacovis_summary_betai_reg.out",h=T)
+#graphics.off()
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+On these graphs, SNPs are repeated 7 times along the x-axis, one repetition for each environmental covariates. So we can see that:
+
+  - No effect of the annual precipitation (`bio12`) and the depth available to roots (`depth_roots`).
+  
+  - <span style="color: red;">The two variables that show the highest association with the allele frequencies are the annual daily mean temperature (`bio1`) and the mean diurnal temperature range (`bio2`).</span>
+  
+  - 3 variables that show small association with the allele frequencies: the precipitation of the driest month (`bio14`), the total available water content (`water_top`) and the topographic roughness index (`TRI`).
+  
+  
+**From @gautier2015genome:** "Based on the STD model, Coop et al. (2010) relied on importance sampling (BF$_{is}$) estimates of the BF to assess association of allele frequency differences with population-specific covariables. A major advantage of this algorithm stems from its computational efficiency, since only parameter samples drawn from the core model are required. However, the simulation study showed that estimating the $\beta_{i}$ regression coefficients with **this approach tended to bias (sometimes strongly) the estimates toward zero**, as opposed to the posterior means from MCMC parameter values sampled under the STD model. Accordingly, the performances of decision criteria based on eBPs that measure to which extent the posterior distribution of the $\beta_{i}$ departs from 0 were generally poorer for the eBP$_{is}$ than for the BF$_{mc}$."
+
+## MCMC sampling covariate model
+
+
+```{bash MCMCCovariateModel, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile 5165snps523genotypesImpNABayPass \
+    -covmcmc \
+    -efile EnvVariablesBayPass \
+    -omegafile anacore_mat_omega.out \
+    -outprefix anacovmcmc
+```
+
+We did not specify the `-seed` option, by default it is 5001.
+
+
+```{r PlotsMCMCCovariateModel, fig.height=8,fig.width=12}
+covmcmc.snp.res=read.table("outputs/CandidateSNPs/baypass/anacovmcmc_summary_betai.out",h=T)
+covmcmc.snp.xtx=read.table("outputs/CandidateSNPs/baypass/anacovmcmc_summary_pi_xtx.out",h=T)$M_XtX
+#graphics.on()
+layout(matrix(1:3,3,1))
+plot(covmcmc.snp.res$eBPmc,xlab="SNP",ylab="eBPmc",main="Empirical Bayesian P-values")
+plot(covmcmc.snp.res$M_Beta,xlab="SNP",ylab=expression(beta~"coefficient"),main="Regression coefficients (posterior mean)")
+plot(covmcmc.snp.xtx,xlab="SNP",ylab="XtX corrected for SMS",main="XtX (corrected for the covariable effect)")
+```
+
+<span style="color: red;">Plots are similar to the results obtained with Important Sampling: the two most important environmental variables are `bio1` and `bio2`.</span>
+
+
+
+# The auxiliary covariate model
+
+**From <span style="font-variant:small-caps;">BayPass</span> manual:** "The auxiliary covariate model, represented in Figure 1C and activated with the `-auxmodel` option, is an extension of the previous model (Figure 1B). It involves the introduction of a Bayesian (binary) auxiliary variable $\delta_{ik}$ for each regression coefficient $\beta_{ik}$ (Gautier, 2015). **The auxiliary variable actually indicates whether a specific SNP $i$ can be regarded as associated to a given covariable $k$** ($\delta_{ik}$ = 1) or not ($\delta_{ik}$ = 0). By looking at the posterior distribution of each auxiliary variable, it is then straightforward to derive a Bayes Factor (BF$_{mc}$) to compare both models while dealing with multiple testing issues (Gautier, 2015). In addition, the introduction of a Bayesian auxiliary
+variable makes it easier to account for spatial dependency among markers. In <span style="font-variant:small-caps;">BayPass</span>, the general form of the $\delta_{ik}$ prior distribution is indeed that of an 1D Ising model with a parametrization analogous to the one proposed in a similar context by Duforet-Frebourg et al. (2014): $\pi (\delta_{k}) \propto  P^{s_{1}} (1 − P)^{s_{0}} e^{\eta_{b_{is}}}$, where $\delta_{k}$ is the vector of the `nsnp` auxiliary variables for covariable $k$, **$s_{1}$ and $s_{0}$ are the number of SNPs associated (i.e. with $\delta_{ik}$ = 1) and not associated (i.e. with $\delta_{ik}$ = 0) to the covariable**, and $\eta$ corresponds to the number of pairs of consecutive markers (neighbors) that are in the same state at the auxiliary variable (i.e., $\delta_{i,k} = \delta_{i+1,k}$). **The parameter $P$ broadly corresponds to the prior proportion of SNP associated to the covariable**. In the <span style="font-variant:small-caps;">BayPass</span> auxiliary model, $P$ is assumed a priori beta distributed: $P \sim \beta(a_{P}, b_{P})$. By
+default, $a_{P} = 0.02$ and $b_{P} = 1.98$ (this values might be changed by the user with the `-auxPbetaprior` option) which amounts to consider that only a $P$ small fraction of the SNPs ($a_{P}/(a_{P} +b_{P}) =1$%) are a priori expected to be associated to the covariable while allowing some uncertainty on this key parameter (e.g., the prior probability of $P$ >10% being equal to 0.028 with default parameters). The parameter $b_{is}$ , called the inverse temperature in the Ising (and Potts) model literature, determines the level of spatial homogeneity of the auxiliary variables between neighbors. In BayPass, $b_{is} = 0$ by default implying that **auxiliary variables are independent (no spatial dependency)**. Note that $b_{is} = 0$ amounts to assume the $\delta_{ik}$ follows a Bernoulli distribution
+with parameter $P$ . Conversely, $b_{is}$ > 0 leads to assume that the $\delta_{ik}$ with similar values tend to cluster according to the underlying SNP positions (the higher the $b_{is}$, the higher the level of spatial homogeneity). In biological terms, SNP associated to a given covariable might be expected to cluster due to Linkage Disequilibrium with the underlying (possibly not genotyped) causal variant(s). In practice, $b_{is}=1$ is commonly used and a value of $b_{is}$ ≤ 1 is recommended.
+
+The auxiliary variable covariate model is represented in the following figure (**Figure 1C from the <span style="font-variant:small-caps;">BayPass</span> the manual**):
+
+![](AuxModelBayPass.png)
+
+
+```{bash MCMCAuxModel, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile 5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile EnvVariablesBayPass \
+    -omegafile anacore_mat_omega.out \
+    -outprefix anacovaux
+```
+
+We did not specify the `-seed` option, by default it is 5001.
+
+
+```{r PlotsMCMCAuxCovariateModel, fig.height=10,fig.width=14}
+covaux.snp.res=read.table("outputs/CandidateSNPs/baypass/anacovaux_summary_betai.out",h=T)
+covaux.snp.xtx=read.table("outputs/CandidateSNPs/baypass/anacovaux_summary_pi_xtx.out",h=T)$M_XtX
+layout(matrix(1:3,3,1))
+plot(covaux.snp.res$BF.dB.,xlab="SNP",ylab="BFmc (in dB)",main="Bayes Factor")
+plot(covaux.snp.res$M_Beta,xlab="SNP",ylab=expression(beta~"coefficient"),main="Regression coefficients (posterior mean)")
+plot(covaux.snp.xtx,xlab="SNP",ylab="XtX corrected for SMS",main="XtX (corrected for the covariable effect)")
+```
+
+
+<span style="color: red;">QUESTION: we can introduce spatial dependency between SNPs with $\beta_{is}=1$ in the Ising prior, **do we do it?** </span>
+
+
+
+
+
+# Checking convergence
+
+**From <span style="font-variant:small-caps;">BayPass</span> manual:** "As for any MCMC analysis, it is recommended to run several independent MCMC (e.g., from 3 to 5), using different seeds for the random number generators (see `-seed` option). Comparing the estimates of parameters like $\Omega$ and statistics like $XtX$ or BF across runs allows ensuring (**empirically**) that the chains properly converged. For large enough data sets, estimations are generally reproducible for most parameters and statistics. Yet, for measures like the BF$_{is}$ that are based on an Importance Sampling approximation, single run estimations may be unstable (in particular when the number of populations is small), it is then recommended to use as an estimate the median computed over several different independent runs (for a real life example see @gautier2018genomic)."
+
+**In @gautier2018genomic:** "Three independent runs (using the option `-seed`) were performed for each dataset. The estimated model hyper-parameters were highly consistent across both runs and datasets. Support for association of each SNP with the corresponding prevalence covariate was then evaluated using the median Bayes Factor (BF) computed over the three independent runs."
+
+
+<span style="color: red;">So, in this section, to check convergence, we run 4 new independant runs (different `-seed` options) for the estimation of $\Omega$, the standard covariate model (both using MCMC and IS) and the auxiliary covariate model. We compare $\Omega$, $XtX$ and BF (or empirical Bayesian p-values) across runs (looking at their correlation).</span>
+
+## Checking the estimation of $\Omega$
+
+### running 
+
+> Independant run 1
+
+```{bash EstimOmegacheck1, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkEstimationOmega
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -outprefix anacore1 \
+    -seed 444
+```
+
+> Independant run 2
+
+```{bash EstimOmegacheck2, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkEstimationOmega
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -outprefix anacore2 \
+    -seed 204
+```
+
+> Independant run 3
+
+```{bash EstimOmegacheck3, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkEstimationOmega
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -outprefix anacore3 \
+    -seed 284
+```
+
+> Independant run 4
+
+```{bash EstimOmegacheck4, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkEstimationOmega
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -outprefix anacore4 \
+    -seed 428
+```
+
+### checking
+
+Let's compare the **posterior means** and **posterior standard deviations** of each element of the $npop \times npop$ scaled population allele frequencies covariance matrix $\Omega$.
+
+```{r CheckingConvergenceEstimOmega, eval=T}
+# posterior means
+m0 <- read.table("outputs/CandidateSNPs/baypass/anacore_summary_lda_omega.out",h=T)$M_omega_ij
+m1 <- read.table("outputs/CandidateSNPs/baypass/checkEstimationOmega/anacore1_summary_lda_omega.out",h=T)$M_omega_ij
+m2 <- read.table("outputs/CandidateSNPs/baypass/checkEstimationOmega/anacore2_summary_lda_omega.out",h=T)$M_omega_ij
+m3 <- read.table("outputs/CandidateSNPs/baypass/checkEstimationOmega/anacore3_summary_lda_omega.out",h=T)$M_omega_ij
+m4 <- read.table("outputs/CandidateSNPs/baypass/checkEstimationOmega/anacore3_summary_lda_omega.out",h=T)$M_omega_ij
+cor(data.frame(m0,m1,m2,m3,m4))
+
+# posterior standard deviations
+sd0 <- read.table("outputs/CandidateSNPs/baypass/anacore_summary_lda_omega.out",h=T)$SD_omega_ij
+sd1 <- read.table("outputs/CandidateSNPs/baypass/checkEstimationOmega/anacore1_summary_lda_omega.out",h=T)$SD_omega_ij
+sd2 <- read.table("outputs/CandidateSNPs/baypass/checkEstimationOmega/anacore2_summary_lda_omega.out",h=T)$SD_omega_ij
+sd3 <- read.table("outputs/CandidateSNPs/baypass/checkEstimationOmega/anacore3_summary_lda_omega.out",h=T)$SD_omega_ij
+sd4 <- read.table("outputs/CandidateSNPs/baypass/checkEstimationOmega/anacore4_summary_lda_omega.out",h=T)$SD_omega_ij
+cor(data.frame(sd0,sd1,sd2,sd3,sd4))
+```
+
+<span style="color: red;">Estimates of $\Omega$ across independant runs are highly similar, so **we can conclude that the chains properly converged and that the estimation of $\Omega$ is robust and reproducible**.</span>
+
+## Checking the IS estimates
+
+### running
+
+> Independant run 1
+
+```{bash ISruns1, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkISruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1 \
+    -seed 444
+```
+
+> Independant run 2
+
+```{bash ISruns2, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkISruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2 \
+    -seed 204
+```
+
+
+> Independant run 3
+
+```{bash ISruns3, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkISruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3 \
+    -seed 284
+```
+
+> Independant run 4
+
+```{bash ISruns4, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkISruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4 \
+    -seed 428
+```
+
+### checking
+
+```{r CheckingConvergenceIS,  eval=T}
+# BF
+BF0 <- read.table("outputs/CandidateSNPs/baypass/anacovis_summary_betai_reg.out",h=T)$BF.dB.
+BF1 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF0,BF1,BF2,BF3,BF4))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst0 <- read.table("outputs/CandidateSNPs/baypass/anacovis_summary_pi_xtx.out",h=T)$XtXst
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst0,XtXst1,XtXst2,XtXst3,XtXst4))
+
+# Regression coefficients Beta_is
+beta0 <- read.table("outputs/CandidateSNPs/baypass/anacovis_summary_betai_reg.out",h=T)$Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/checkISruns/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta0,beta1,beta2,beta3,beta4))
+```
+
+<span style="color: red;">Estimates of the Bayes Factors, XtXst and the regression coefficients across independant runs are similar: correlations coefficients higher than 0.92.</span>
+
+## Checking the MCMC estimates
+
+### running
+
+> Independant run 1
+
+```{bash MCMCindrun1, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkMCMCruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -covmcmc \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovmcmc1  \
+    -seed 444
+```
+
+> Independant run 2
+
+```{bash MCMCindrun2, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkMCMCruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -covmcmc \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovmcmc2 \
+    -seed 204
+```
+
+> Independant run 3
+
+```{bash MCMCindrun3, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkMCMCruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -covmcmc \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovmcmc3 \
+    -seed 284
+```
+
+> Independant run 4
+
+```{bash MCMCindrun4, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkMCMCruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -covmcmc \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovmcmc4 \
+    -seed 428
+```
+
+### checking
+
+```{r CheckingConvergenceMCMC, eval=T}
+# Empirical Bayesian P-values
+eBPmc0 <- read.table("outputs/CandidateSNPs/baypass/anacovmcmc_summary_betai.out",h=T)$eBPmc
+eBPmc1 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc1_summary_betai.out",h=T)$eBPmc
+eBPmc2 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc2_summary_betai.out",h=T)$eBPmc
+eBPmc3 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc3_summary_betai.out",h=T)$eBPmc
+eBPmc4 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc4_summary_betai.out",h=T)$eBPmc
+cor(data.frame(eBPmc0,eBPmc1,eBPmc2,eBPmc3,eBPmc4))
+
+# posterior mean if the XtX statistics (corrected for the covariable effect)
+mXtX0 <- read.table("outputs/CandidateSNPs/baypass/anacovmcmc_summary_pi_xtx.out",h=T)$M_XtX
+mXtX1 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc1_summary_pi_xtx.out",h=T)$M_XtX
+mXtX2 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc2_summary_pi_xtx.out",h=T)$M_XtX
+mXtX3 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc3_summary_pi_xtx.out",h=T)$M_XtX
+mXtX4 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc4_summary_pi_xtx.out",h=T)$M_XtX
+cor(data.frame(mXtX0,mXtX1,mXtX2,mXtX3,mXtX4))
+
+# Regression coefficients M_Beta
+beta0 <- read.table("outputs/CandidateSNPs/baypass/anacovmcmc_summary_betai.out",h=T)$M_Beta
+beta1 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc1_summary_betai.out",h=T)$M_Beta
+beta2 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc2_summary_betai.out",h=T)$M_Beta
+beta3 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc3_summary_betai.out",h=T)$M_Beta
+beta4 <- read.table("outputs/CandidateSNPs/baypass/checkMCMCruns/anacovmcmc4_summary_betai.out",h=T)$M_Beta
+cor(data.frame(beta0,beta1,beta2,beta3,beta4))
+```
+
+<span style="color: red;">Estimates of the empirical Bayesian p-values, XtX statistic and the regression coefficients across independant runs have not so high correlation coefficients: $\sim$ 0.62 for the empirical p-values, $\sim$ 0.82 for the XtX statistic and $\sim$ 0.84 for the regression coefficients. </span>
+
+## Checking the AUX estimates
+
+### running
+
+> Independant run 1
+
+```{bash AUXindrun1, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkAUXruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux1  \
+    -seed 444
+```
+
+> Independant run 2
+
+```{bash AUXindrun2, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkAUXruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux2 \
+    -seed 204
+```
+
+> Independant run 3
+
+```{bash AUXindrun3, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkAUXruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux3 \
+    -seed 284
+```
+
+> Independant run 4
+
+```{bash AUXindrun4, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/checkAUXruns
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPass \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux4 \
+    -seed 428
+```
+
+### checking
+
+```{r CheckingConvergenceAUX, eval=T}
+# Bayes factors
+BF0 <- read.table("outputs/CandidateSNPs/baypass/anacovaux_summary_betai.out",h=T)$BF.dB.
+BF1 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux1_summary_betai.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux2_summary_betai.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux3_summary_betai.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux4_summary_betai.out",h=T)$BF.dB.
+cor(data.frame(BF0,BF1,BF2,BF3,BF4))
+
+# posterior mean if the XtX statistics (corrected for the covariable effect)
+mXtX0 <- read.table("outputs/CandidateSNPs/baypass/anacovaux_summary_pi_xtx.out",h=T)$M_XtX
+mXtX1 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+mXtX2 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux2_summary_pi_xtx.out",h=T)$M_XtX
+mXtX3 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux3_summary_pi_xtx.out",h=T)$M_XtX
+mXtX4 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux4_summary_pi_xtx.out",h=T)$M_XtX
+cor(data.frame(mXtX0,mXtX1,mXtX2,mXtX3,mXtX4))
+
+# Regression coefficients M_Beta
+beta0 <- read.table("outputs/CandidateSNPs/baypass/anacovaux_summary_betai.out",h=T)$M_Beta
+beta1 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux1_summary_betai.out",h=T)$M_Beta
+beta2 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux2_summary_betai.out",h=T)$M_Beta
+beta3 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux3_summary_betai.out",h=T)$M_Beta
+beta4 <- read.table("outputs/CandidateSNPs/baypass/checkAUXruns/anacovaux4_summary_betai.out",h=T)$M_Beta
+cor(data.frame(beta0,beta1,beta2,beta3,beta4))
+```
+
+<span style="color: red;">Estimates of the Bayes factors, XtX statistic and the regression coefficients across independant runs have not so high correlation coefficients: between 0.54 and 0.6 for the BF, between 0.64 and 0.75 for the XtX statistic and between 0.65 and 0.8 for the regression coefficients. </span>
+
+# Identifying the candidate SNPs
+
+**From @gautier2015genome:** "Accordingly, the BFs estimated under the AUX model (BF$_{mc}$) had more power to identify SNPs associated to the population-specific covariables than the corresponding $BF_{is}$. [...] For the SpaH data (but not for the SpaB data) a similar trend was observed when comparing decision criteria based on the eBP$_{is}$ (relying on the importance sampling algorithm) and the eBP$_{mc}$ estimated under the STD model (see Table 2 and Figure S10). In addition, Table 2 shows that the intuitive, but still arbitrary, threshold of 3 on the eBP performed worse than the 20-dB threshold on the BF, particularly for the smallest $|\beta_{i}|$: **This suggests that a decision criterion rule relying on the BF$_{mc}$ may be the most reliable in the context of these models.**"
+
+> Quick look at the regression coefficients in each method. 
+
+Here we look at the number of association between a given SNP and a given environmental covariate has a $\beta_{is}$ higher than a given threshold. `IS` and `MCMC` refer to the standard covariate model via Important sampling or MCMC methods. `AUX` refers to the auxiliary covariate model via MCMC.
+
+```{r regCoeff}
+beta.mcmc <- read.table("outputs/CandidateSNPs/baypass/anacovmcmc_summary_betai.out",h=T)$M_Beta
+beta.is <- read.table("outputs/CandidateSNPs/baypass/anacovis_summary_betai_reg.out",h=T)$Beta_is
+beta.aux <- read.table("outputs/CandidateSNPs/baypass/anacovaux_summary_betai.out",h=T)$M_Beta
+DF <- data.frame(threshold=c("|beta|= 0.01","|beta|= 0.02","|beta|= 0.05","|beta|= 0.10","|beta|= 0.20"),MCMC=NA,IS=NA,AUX=NA)
+
+DF[DF$threshold=="|beta|= 0.01",2:4] <- c(length(which(abs(beta.mcmc)>0.01)),
+                                          length(which(abs(beta.is)>0.01)),
+                                          length(which(abs(beta.aux)>0.01)))
+DF[DF$threshold=="|beta|= 0.02",2:4] <- c(length(which(abs(beta.mcmc)>0.02)),
+                                          length(which(abs(beta.is)>0.02)),
+                                          length(which(abs(beta.aux)>0.02)))
+DF[DF$threshold=="|beta|= 0.05",2:4] <- c(length(which(abs(beta.mcmc)>0.05)),
+                                          length(which(abs(beta.is)>0.05)),
+                                          length(which(abs(beta.aux)>0.05)))
+DF[DF$threshold=="|beta|= 0.10",2:4] <- c(length(which(abs(beta.mcmc)>0.1)),
+                                         length(which(abs(beta.is)>0.1)),
+                                         length(which(abs(beta.aux)>0.1)))
+DF[DF$threshold=="|beta|= 0.20",2:4] <- c(length(which(abs(beta.mcmc)>0.2)),
+                                         length(which(abs(beta.is)>0.2)),
+                                         length(which(abs(beta.aux)>0.2)))
+kable(DF)
+```
+
+These results are consistent with @gautier2015genome
+
+
+
+## Based on the IS standard covariate model
+
+```{r SelectSNP20dBISmodel}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/anacovis_summary_betai_reg.out",h=T)
+range(covis.snp.res$BF.dB.)
+```
+
+<span style="color: red;">In the IS model, no SNPs have BF > 20dB.</span>
+
+## Based on the MCMC standard covariate model
+
+```{r SelectSNP20dBMCMCmodel}
+covmcmc.snp.res=read.table("outputs/CandidateSNPs/baypass/anacovmcmc_summary_betai.out",h=T)
+range(covmcmc.snp.res$eBPmc)
+length(which(covmcmc.snp.res$eBPmc<0.01))
+length(which(abs(covmcmc.snp.res$M_Beta)>0.02))
+df.select <- covmcmc.snp.res[which(covmcmc.snp.res$eBPmc<0.01),]
+df.select
+which(abs(df.select$M_Beta)>0.01)
+```
+
+<span style="color: red;">In the MCMC standard model, 706 SNPs have a Bayesian p-value smaller than 0.01 and 2740 SNPs have a regression coefficient higher than 0.02. But among there is no SNPs that have both a Bayesian p-value higher than 0.01 and a regression coefficient higher than 0.02.</span>
+
+## Based on the auxiliary covariate model
+
+> Identifying the SNPs based on the Bayes factors
+
+```{r SelectSNP20dBAuxmodel}
+covaux.snp.res=read.table("outputs/CandidateSNPs/baypass/anacovaux_summary_betai.out",h=T)
+length(which(covaux.snp.res$BF.dB.>20))
+covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
+```
+
+
+<span style="color: red;">Based on the auxiliary covariate model, 21 SNPs have a BF > 20dB. 20 of the SNPs are associated with `bio2` (the mean diurnal temperature range) and the absolute values of their regression coefficients are higher than 0.02. 1 SNP is associated with `depth_roots` (the depth available to roots) but its regression coefficients is very weak (-0.00087).</span>
+
+> Identifying the SNPs based on the regression coefficients
+
+```{r SelectSNPBetaThresholdAuxmodel}
+length(which(abs(covaux.snp.res$M_Beta)>0.01))
+covaux.snp.res[which(abs(covaux.snp.res$M_Beta)>0.01),]
+```
+
+<span style="color: red;">Based on the auxiliary covariate model, 29 SNPs show $\beta_{i}$ > 0.01. 27 of the SNPs are associated with `bio2` (the mean diurnal temperature range) and 2 SNPs are associated with `bio1` (the annual daily mean temperature).</span>
+
+> Let's compare with RDA outputs
+
+```{r CompWithRDAoutputs}
+rda.cacand <- readRDS(file="outputs/CandidateSNPs/rda/185CandSNPsRDA_AvgWater.rds")
+
+names.snp.df <- data.frame(MRK=1:length(colnames(geno)),snp=colnames(geno))
+head(names.snp.df )
+
+# based on the Bayes Factors
+select.snps <- covaux.snp.res[which(abs(covaux.snp.res$M_Beta)>0.01),]
+select.snps <- left_join(select.snps,names.snp.df,by="MRK")
+select.snps[which(select.snps$snp %in% rda.cacand$snp),]
+
+# based on the regression coefficients
+select.snps <- covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
+select.snps <- left_join(select.snps,names.snp.df,by="MRK")
+select.snps[which(select.snps$snp %in% rda.cacand$snp),]
+```
+
+# MCMC with one covariate at a time
+
+In <span style="font-variant:small-caps;">BayPass</span> manual, "it is recommended to consider only one covariable at a time (particularly if some covariables are correlated)."
+
+## Running and checking
+
+#### bio1
+
+```{bash MCMCAuxModelBio1, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/MCMCrunsBio1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux5
+```
+
+```{r CheckingConvergenceAUXBio1, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux1_summary_betai.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux2_summary_betai.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux3_summary_betai.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux4_summary_betai.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux5_summary_betai.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# posterior mean if the XtX statistics (corrected for the covariable effect)
+mXtX1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+mXtX2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux2_summary_pi_xtx.out",h=T)$M_XtX
+mXtX3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux3_summary_pi_xtx.out",h=T)$M_XtX
+mXtX4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux4_summary_pi_xtx.out",h=T)$M_XtX
+mXtX5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux5_summary_pi_xtx.out",h=T)$M_XtX
+cor(data.frame(mXtX1,mXtX2,mXtX3,mXtX4,mXtX5))
+
+# Regression coefficients M_Beta
+beta1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux1_summary_betai.out",h=T)$M_Beta
+beta2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux2_summary_betai.out",h=T)$M_Beta
+beta3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux3_summary_betai.out",h=T)$M_Beta
+beta4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux4_summary_betai.out",h=T)$M_Beta
+beta5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux5_summary_betai.out",h=T)$M_Beta
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+
+```{r PlotsMCMCAuxCovariateModelBio1, fig.height=10,fig.width=14,eval=T}
+covaux.snp.res=read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux1_summary_betai.out",h=T)
+covaux.snp.xtx=read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio1/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+layout(matrix(1:3,3,1))
+plot(covaux.snp.res$BF.dB.,xlab="SNP",ylab="BFmc (in dB)",main="Bayes Factor")
+plot(covaux.snp.res$M_Beta,xlab="SNP",ylab=expression(beta~"coefficient"),main="Regression coefficients (posterior mean)")
+plot(covaux.snp.xtx,xlab="SNP",ylab="XtX corrected for SMS",main="XtX (corrected for the covariable effect)")
+```
+
+```{r IdentifySNPsAuxCovariateModelBio1,eval=T}
+length(which(covaux.snp.res$BF.dB.>20))
+covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
+```
+
+
+#### bio2
+
+```{bash MCMCAuxModelBio2, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/MCMCrunsBio2
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux5
+```
+
+```{r CheckingConvergenceAUXBio2, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux1_summary_betai.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux2_summary_betai.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux3_summary_betai.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux4_summary_betai.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux5_summary_betai.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# posterior mean if the XtX statistics (corrected for the covariable effect)
+mXtX1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+mXtX2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux2_summary_pi_xtx.out",h=T)$M_XtX
+mXtX3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux3_summary_pi_xtx.out",h=T)$M_XtX
+mXtX4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux4_summary_pi_xtx.out",h=T)$M_XtX
+mXtX5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux5_summary_pi_xtx.out",h=T)$M_XtX
+cor(data.frame(mXtX1,mXtX2,mXtX3,mXtX4,mXtX5))
+
+# Regression coefficients M_Beta
+beta1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux1_summary_betai.out",h=T)$M_Beta
+beta2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux2_summary_betai.out",h=T)$M_Beta
+beta3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux3_summary_betai.out",h=T)$M_Beta
+beta4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux4_summary_betai.out",h=T)$M_Beta
+beta5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux5_summary_betai.out",h=T)$M_Beta
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+
+```{r PlotsMCMCAuxCovariateModelBio2, fig.height=10,fig.width=14,eval=T}
+covaux.snp.res=read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux1_summary_betai.out",h=T)
+covaux.snp.xtx=read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio2/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+layout(matrix(1:3,3,1))
+plot(covaux.snp.res$BF.dB.,xlab="SNP",ylab="BFmc (in dB)",main="Bayes Factor")
+plot(covaux.snp.res$M_Beta,xlab="SNP",ylab=expression(beta~"coefficient"),main="Regression coefficients (posterior mean)")
+plot(covaux.snp.xtx,xlab="SNP",ylab="XtX corrected for SMS",main="XtX (corrected for the covariable effect)")
+```
+
+```{r IdentifySNPsAuxCovariateModelBio2,eval=T}
+length(which(covaux.snp.res$BF.dB.>20))
+covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
+```
+
+
+#### bio12
+
+```{bash MCMCAuxModelBio12, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/MCMCrunsBio12
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux5
+```
+
+```{r CheckingConvergenceAUXBio12, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux1_summary_betai.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux2_summary_betai.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux3_summary_betai.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux4_summary_betai.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux5_summary_betai.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# posterior mean if the XtX statistics (corrected for the covariable effect)
+mXtX1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+mXtX2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux2_summary_pi_xtx.out",h=T)$M_XtX
+mXtX3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux3_summary_pi_xtx.out",h=T)$M_XtX
+mXtX4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux4_summary_pi_xtx.out",h=T)$M_XtX
+mXtX5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux5_summary_pi_xtx.out",h=T)$M_XtX
+cor(data.frame(mXtX1,mXtX2,mXtX3,mXtX4,mXtX5))
+
+# Regression coefficients M_Beta
+beta1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux1_summary_betai.out",h=T)$M_Beta
+beta2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux2_summary_betai.out",h=T)$M_Beta
+beta3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux3_summary_betai.out",h=T)$M_Beta
+beta4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux4_summary_betai.out",h=T)$M_Beta
+beta5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux5_summary_betai.out",h=T)$M_Beta
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+
+```{r PlotsMCMCAuxCovariateModelBio12, fig.height=10,fig.width=14,eval=T}
+covaux.snp.res=read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux1_summary_betai.out",h=T)
+covaux.snp.xtx=read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio12/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+layout(matrix(1:3,3,1))
+plot(covaux.snp.res$BF.dB.,xlab="SNP",ylab="BFmc (in dB)",main="Bayes Factor")
+plot(covaux.snp.res$M_Beta,xlab="SNP",ylab=expression(beta~"coefficient"),main="Regression coefficients (posterior mean)")
+plot(covaux.snp.xtx,xlab="SNP",ylab="XtX corrected for SMS",main="XtX (corrected for the covariable effect)")
+```
+
+```{r IdentifySNPsAuxCovariateModelBio12,eval=T}
+length(which(covaux.snp.res$BF.dB.>20))
+covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
+```
+
+#### bio14
+
+```{bash MCMCAuxModelBio14, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/MCMCrunsBio14
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux5
+```
+
+```{r CheckingConvergenceAUXBio14, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux1_summary_betai.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux2_summary_betai.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux3_summary_betai.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux4_summary_betai.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux5_summary_betai.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# posterior mean if the XtX statistics (corrected for the covariable effect)
+mXtX1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+mXtX2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux2_summary_pi_xtx.out",h=T)$M_XtX
+mXtX3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux3_summary_pi_xtx.out",h=T)$M_XtX
+mXtX4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux4_summary_pi_xtx.out",h=T)$M_XtX
+mXtX5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux5_summary_pi_xtx.out",h=T)$M_XtX
+cor(data.frame(mXtX1,mXtX2,mXtX3,mXtX4,mXtX5))
+
+# Regression coefficients M_Beta
+beta1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux1_summary_betai.out",h=T)$M_Beta
+beta2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux2_summary_betai.out",h=T)$M_Beta
+beta3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux3_summary_betai.out",h=T)$M_Beta
+beta4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux4_summary_betai.out",h=T)$M_Beta
+beta5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux5_summary_betai.out",h=T)$M_Beta
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+
+```{r PlotsMCMCAuxCovariateModelBio14, fig.height=10,fig.width=14,eval=T}
+covaux.snp.res=read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux1_summary_betai.out",h=T)
+covaux.snp.xtx=read.table("outputs/CandidateSNPs/baypass/MCMCrunsBio14/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+layout(matrix(1:3,3,1))
+plot(covaux.snp.res$BF.dB.,xlab="SNP",ylab="BFmc (in dB)",main="Bayes Factor")
+plot(covaux.snp.res$M_Beta,xlab="SNP",ylab=expression(beta~"coefficient"),main="Regression coefficients (posterior mean)")
+plot(covaux.snp.xtx,xlab="SNP",ylab="XtX corrected for SMS",main="XtX (corrected for the covariable effect)")
+```
+
+```{r IdentifySNPsAuxCovariateModelBio14,eval=T}
+length(which(covaux.snp.res$BF.dB.>20))
+covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
+```
+
+
+#### water_top
+
+
+```{bash MCMCAuxModelWaterTop, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/MCMCrunsWaterTop
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux5
+```
+
+```{r CheckingConvergenceAUXWaterTop, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux1_summary_betai.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux2_summary_betai.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux3_summary_betai.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux4_summary_betai.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux5_summary_betai.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# posterior mean if the XtX statistics (corrected for the covariable effect)
+mXtX1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+mXtX2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux2_summary_pi_xtx.out",h=T)$M_XtX
+mXtX3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux3_summary_pi_xtx.out",h=T)$M_XtX
+mXtX4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux4_summary_pi_xtx.out",h=T)$M_XtX
+mXtX5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux5_summary_pi_xtx.out",h=T)$M_XtX
+cor(data.frame(mXtX1,mXtX2,mXtX3,mXtX4,mXtX5))
+
+# Regression coefficients M_Beta
+beta1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux1_summary_betai.out",h=T)$M_Beta
+beta2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux2_summary_betai.out",h=T)$M_Beta
+beta3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux3_summary_betai.out",h=T)$M_Beta
+beta4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux4_summary_betai.out",h=T)$M_Beta
+beta5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux5_summary_betai.out",h=T)$M_Beta
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+
+```{r PlotsMCMCAuxCovariateModelWaterTop, fig.height=10,fig.width=14,eval=T}
+covaux.snp.res=read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux1_summary_betai.out",h=T)
+covaux.snp.xtx=read.table("outputs/CandidateSNPs/baypass/MCMCrunsWaterTop/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+layout(matrix(1:3,3,1))
+plot(covaux.snp.res$BF.dB.,xlab="SNP",ylab="BFmc (in dB)",main="Bayes Factor")
+plot(covaux.snp.res$M_Beta,xlab="SNP",ylab=expression(beta~"coefficient"),main="Regression coefficients (posterior mean)")
+plot(covaux.snp.xtx,xlab="SNP",ylab="XtX corrected for SMS",main="XtX (corrected for the covariable effect)")
+```
+
+```{r IdentifySNPsAuxCovariateModelWaterTop,eval=T}
+length(which(covaux.snp.res$BF.dB.>20))
+covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
+```
+
+
+#### depth_roots
+
+```{bash MCMCAuxModelDepthRoots, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux5
+```
+
+```{r CheckingConvergenceAUXDepthRoots, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux1_summary_betai.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux2_summary_betai.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux3_summary_betai.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux4_summary_betai.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux5_summary_betai.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# posterior mean if the XtX statistics (corrected for the covariable effect)
+mXtX1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+mXtX2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux2_summary_pi_xtx.out",h=T)$M_XtX
+mXtX3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux3_summary_pi_xtx.out",h=T)$M_XtX
+mXtX4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux4_summary_pi_xtx.out",h=T)$M_XtX
+mXtX5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux5_summary_pi_xtx.out",h=T)$M_XtX
+cor(data.frame(mXtX1,mXtX2,mXtX3,mXtX4,mXtX5))
+
+# Regression coefficients M_Beta
+beta1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux1_summary_betai.out",h=T)$M_Beta
+beta2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux2_summary_betai.out",h=T)$M_Beta
+beta3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux3_summary_betai.out",h=T)$M_Beta
+beta4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux4_summary_betai.out",h=T)$M_Beta
+beta5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux5_summary_betai.out",h=T)$M_Beta
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+
+```{r PlotsMCMCAuxCovariateModelDepthRoots, fig.height=10,fig.width=14,eval=T}
+covaux.snp.res=read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux1_summary_betai.out",h=T)
+covaux.snp.xtx=read.table("outputs/CandidateSNPs/baypass/MCMCrunsDepthRoots/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+layout(matrix(1:3,3,1))
+plot(covaux.snp.res$BF.dB.,xlab="SNP",ylab="BFmc (in dB)",main="Bayes Factor")
+plot(covaux.snp.res$M_Beta,xlab="SNP",ylab=expression(beta~"coefficient"),main="Regression coefficients (posterior mean)")
+plot(covaux.snp.xtx,xlab="SNP",ylab="XtX corrected for SMS",main="XtX (corrected for the covariable effect)")
+```
+
+```{r IdentifySNPsAuxCovariateModelDepthRoots,eval=T}
+length(which(covaux.snp.res$BF.dB.>20))
+covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
+```
+
+
+#### TRI
+
+```{bash MCMCAuxModelTRI, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/MCMCrunsTRI
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -auxmodel \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovaux5
+```
+
+```{r CheckingConvergenceAUXTRI, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux1_summary_betai.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux2_summary_betai.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux3_summary_betai.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux4_summary_betai.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux5_summary_betai.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# posterior mean if the XtX statistics (corrected for the covariable effect)
+mXtX1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+mXtX2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux2_summary_pi_xtx.out",h=T)$M_XtX
+mXtX3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux3_summary_pi_xtx.out",h=T)$M_XtX
+mXtX4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux4_summary_pi_xtx.out",h=T)$M_XtX
+mXtX5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux5_summary_pi_xtx.out",h=T)$M_XtX
+cor(data.frame(mXtX1,mXtX2,mXtX3,mXtX4,mXtX5))
+
+# Regression coefficients M_Beta
+beta1 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux1_summary_betai.out",h=T)$M_Beta
+beta2 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux2_summary_betai.out",h=T)$M_Beta
+beta3 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux3_summary_betai.out",h=T)$M_Beta
+beta4 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux4_summary_betai.out",h=T)$M_Beta
+beta5 <- read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux5_summary_betai.out",h=T)$M_Beta
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+
+```{r PlotsMCMCAuxCovariateModelTRI, fig.height=10,fig.width=14,eval=T}
+covaux.snp.res=read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux1_summary_betai.out",h=T)
+covaux.snp.xtx=read.table("outputs/CandidateSNPs/baypass/MCMCrunsTRI/anacovaux1_summary_pi_xtx.out",h=T)$M_XtX
+layout(matrix(1:3,3,1))
+plot(covaux.snp.res$BF.dB.,xlab="SNP",ylab="BFmc (in dB)",main="Bayes Factor")
+plot(covaux.snp.res$M_Beta,xlab="SNP",ylab=expression(beta~"coefficient"),main="Regression coefficients (posterior mean)")
+plot(covaux.snp.xtx,xlab="SNP",ylab="XtX corrected for SMS",main="XtX (corrected for the covariable effect)")
+```
+
+```{r IdentifySNPsAuxCovariateModelTRI,eval=T}
+length(which(covaux.snp.res$BF.dB.>20))
+covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
+```
+
+# IS with one covariate at a time
+
+In <span style="font-variant:small-caps;">BayPass</span> manual, contrarily to the MCMC model, it is not specify that we should use one covariate at a time. Nevertheless, as Santi told me that he uses IS with one covariate at a time, I check here that I obtain the same results one covariate at a time and all variables together.
+
+```{r CreatedfIS}
+dfIS <- data.frame("BF.threshold (dB)"=c(20,10,5))
+```
+
+
+## Running and checking
+
+#### bio1
+
+```{bash ISAuxModelBio1, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsBio1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio1 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISBio1, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelBio1, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelBio1,eval=T}
+dfIS <- dfIS %>% mutate(bio1=c(length(which(covis.snp.res$BF.dB.>20)),
+                               length(which(covis.snp.res$BF.dB.>10)),
+                               length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "bio1"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+```
+
+#### bio2
+
+```{bash ISAuxModelBio2, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsBio2
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio2 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISBio2, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelBio2, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelBio2,eval=T}
+dfIS <- dfIS %>% mutate(bio2=c(length(which(covis.snp.res$BF.dB.>20)),
+                               length(which(covis.snp.res$BF.dB.>10)),
+                               length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "bio2"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### bio12
+
+```{bash ISAuxModelBio12, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsBio12
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio12 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISBio12, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelBio12, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelBio12,eval=T}
+dfIS <- dfIS %>% mutate(bio12=c(length(which(covis.snp.res$BF.dB.>20)),
+                                length(which(covis.snp.res$BF.dB.>10)),
+                                length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "bio12"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### bio14
+
+```{bash ISAuxModelBio14, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsBio14
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio14 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISBio14, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelBio14, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelBio14,eval=T}
+dfIS <- dfIS %>% mutate(bio14=c(length(which(covis.snp.res$BF.dB.>20)),
+                                length(which(covis.snp.res$BF.dB.>10)),
+                                length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "bio14"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### bio13
+
+```{bash ISAuxModelBio13, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsBio13
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassBio13 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio13 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio13 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio13 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio13 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISBio13, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelBio13, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelBio13,eval=T}
+dfIS <- dfIS %>% mutate(bio13=c(length(which(covis.snp.res$BF.dB.>20)),
+                                length(which(covis.snp.res$BF.dB.>10)),
+                                length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "bio13"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### bio5
+
+```{bash ISAuxModelBio5, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsBio5
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassBio5 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio5 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio5 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio5 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio5 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISBio5, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelBio5, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelBio5,eval=T}
+dfIS <- dfIS %>% mutate(bio5=c(length(which(covis.snp.res$BF.dB.>20)),
+                                length(which(covis.snp.res$BF.dB.>10)),
+                                length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "bio15"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### bio6
+
+```{bash ISAuxModelBio6, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsBio6
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassBio6 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBio6 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBio6 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBio6 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBio6 \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISBio6, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelBio6, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelBio6,eval=T}
+dfIS <- dfIS %>% mutate(bio6=c(length(which(covis.snp.res$BF.dB.>20)),
+                                length(which(covis.snp.res$BF.dB.>10)),
+                                length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "bio6"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### water_top
+
+```{bash ISAuxModelWaterTop, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsWaterTop
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassWaterTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISWaterTop, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelWaterTop, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelWaterTop,eval=T}
+dfIS <- dfIS %>% mutate(water_top=c(length(which(covis.snp.res$BF.dB.>20)),
+                                    length(which(covis.snp.res$BF.dB.>10)),
+                                    length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "water_top"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### sand_top
+
+```{bash ISAuxModelSandTop, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsSandTop
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassSandTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassSandTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassSandTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassSandTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassSandTop \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISSandTop, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelSandTop, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelSandTop,eval=T}
+dfIS <- dfIS %>% mutate(sand_top=c(length(which(covis.snp.res$BF.dB.>20)),
+                                    length(which(covis.snp.res$BF.dB.>10)),
+                                    length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "sand_top"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### depth_roots
+
+```{bash ISAuxModelDepthRoots, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsDepthRoots
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassDepthRoots \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISDepthRoots, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelDepthRoots, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelDepthRoots,eval=T}
+dfIS <- dfIS %>% mutate(depth_roots=c(length(which(covis.snp.res$BF.dB.>20)),
+                                      length(which(covis.snp.res$BF.dB.>10)),
+                                      length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "depth_roots"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### TRI
+
+```{bash ISAuxModelTRI, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsTRI
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassTRI \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r CheckingConvergenceISTRI, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
+```
+
+```{r PlotsISCovariateModelTRI, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+```{r IdentifySNPsISCovariateModelTRI,eval=T}
+dfIS <- dfIS %>% mutate(TRI=c(length(which(covis.snp.res$BF.dB.>20)),
+                              length(which(covis.snp.res$BF.dB.>10)),
+                              length(which(covis.snp.res$BF.dB.>5))))
+
+# Identify the SNPs with BF > 5dB
+for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
+  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
+}
+covis.snp.res$COVARIABLE <- "TRI"
+covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+```
+
+#### Sum-up candidates
+
+```{r DisplaydCandIS}
+dfIS %>% kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+candBaypass %>% kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+#### Common candidates btw RDA and Baypass
+
+Let's look at the SNPs that were both selected by the RDA and <span style="font-variant:small-caps;">BayPass</span>. 
+
+> Set AvgWater
+
+```{r displayCommonCand_AvgWater}
+candRDA <- readRDS(file="outputs/CandidateSNPs/rda/185CandSNPsRDA_AvgWater.rds")
+length(candRDA$snp)
+
+comcand <- candBaypass %>% 
+  filter(COVARIABLE %in% c("bio1","bio2","bio12","bio14","water_top","depth_roots","TRI")) %>% 
+  inner_join(candRDA,by="snp") %>% 
+  select(snp,COVARIABLE,BF.dB.,Beta_is,loading,contains("bio"),water_top,depth_roots,TRI) %>% 
+  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=BF.dB.,beta.Baypass=Beta_is,
+         beta.bio1.RDA=bio1,
+         beta.bio2.RDA=bio2,
+         beta.bio12.RDA=bio12,
+         beta.bio14.RDA=bio14,
+         beta.water_top.RDA=water_top,
+         beta.depth_roots.RDA=depth_roots,
+         beta.TRI.RDA=TRI) 
+
+saveRDS(comcand,file=paste0("outputs/CandidateSNPs/CommonCandidates/",length(comcand$snp),"_CommonCandidates_AvgWater.rds"))
+
+comcand %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+> Set AvgSand
+
+```{r displayCommonCand_AvgSand}
+candRDA <- readRDS(file="outputs/CandidateSNPs/rda/177CandSNPsRDA_AvgSand.rds")
+length(candRDA$snp)
+
+comcand <- candBaypass %>% 
+  filter(COVARIABLE %in% c("bio1","bio2","bio12","bio14","sand_top","depth_roots","TRI")) %>% 
+  inner_join(candRDA,by="snp") %>% 
+  select(snp,COVARIABLE,BF.dB.,Beta_is,loading,contains("bio"),sand_top,depth_roots,TRI) %>% 
+  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=BF.dB.,beta.Baypass=Beta_is,
+         beta.bio1.RDA=bio1,
+         beta.bio2.RDA=bio2,
+         beta.bio12.RDA=bio12,
+         beta.bio14.RDA=bio14,
+         beta.sand_top.RDA=sand_top,
+         beta.depth_roots.RDA=depth_roots,
+         beta.TRI.RDA=TRI)
+
+saveRDS(comcand,file=paste0("outputs/CandidateSNPs/CommonCandidates/",length(comcand$snp),"_CommonCandidates_AvgSand.rds"))
+
+comcand %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+> Set ExtWater
+
+```{r displayCommonCand_ExtWater}
+candRDA <- readRDS(file="outputs/CandidateSNPs/rda/183CandSNPsRDA_ExtWater.rds")
+length(candRDA$snp)
+
+comcand <- candBaypass %>% 
+  filter(COVARIABLE %in% c("bio13","bio14","bio5","bio6","water_top","depth_roots","TRI")) %>% 
+  inner_join(candRDA,by="snp") %>% 
+  select(snp,COVARIABLE,BF.dB.,Beta_is,loading,contains("bio"),water_top,depth_roots,TRI) %>% 
+  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=BF.dB.,beta.Baypass=Beta_is,
+         beta.bio5.RDA=bio5,
+         beta.bio6.RDA=bio6,
+         beta.bio13.RDA=bio13,
+         beta.bio14.RDA=bio14,
+         beta.water_top.RDA=water_top,
+         beta.depth_roots.RDA=depth_roots,
+         beta.TRI.RDA=TRI)
+
+saveRDS(comcand,file=paste0("outputs/CandidateSNPs/CommonCandidates/",length(comcand$snp),"_CommonCandidates_ExtWater.rds"))
+
+comcand %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+> Set ExtSand
+
+```{r displayCommonCand_ExtSand}
+candRDA <- readRDS(file="outputs/CandidateSNPs/rda/173CandSNPsRDA_ExtSand.rds")
+length(candRDA$snp)
+
+comcand <- candBaypass %>% 
+  filter(COVARIABLE %in% c("bio13","bio14","bio5","bio6","sand_top","depth_roots","TRI")) %>% 
+  inner_join(candRDA,by="snp") %>% 
+  select(snp,COVARIABLE,BF.dB.,Beta_is,loading,contains("bio"),sand_top,depth_roots,TRI) %>% 
+  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=BF.dB.,beta.Baypass=Beta_is,
+         beta.bio5.RDA=bio5,
+         beta.bio6.RDA=bio6,
+         beta.bio13.RDA=bio13,
+         beta.bio14.RDA=bio14,
+         beta.sand_top.RDA=sand_top,
+         beta.depth_roots.RDA=depth_roots,
+         beta.TRI.RDA=TRI) 
+saveRDS(comcand,file=paste0("outputs/CandidateSNPs/CommonCandidates/",length(comcand$snp),"_CommonCandidates_ExtSand.rds"))
+
+comcand %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+
+# References
+
