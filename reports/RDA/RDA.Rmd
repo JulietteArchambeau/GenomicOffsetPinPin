@@ -11,6 +11,8 @@ output:
        collapsed: false
     number_sections: true
     highlight: textmate
+editor_options: 
+  chunk_output_type: console
 ---
 
 <style>
@@ -49,9 +51,10 @@ knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
 options(width = 300)
 library(knitr)
 library(vegan)  # to investigate correlations among predictors
-library(psych)  # to run RDA
+library(psych)  # to run RDA and to plot the pairs panels
 library(tidyverse)
 library(adespatial) # to calculate the Moran eigen vectors
+library(kableExtra)
 ```
 
 This script is based on [Forester et al. (2018)](https://onlinelibrary.wiley.com/doi/full/10.1111/mec.14584) and their [vignette](https://popgen.nescent.org/2018-03-27_RDA_GEA.html). All the <span style="color: gray;">quotes in gray</span> in the document come from this vignette.
@@ -63,142 +66,199 @@ In their paper, they investigate the effects of correction for **weak** populati
 
 # DATA
 
+
+
 ## Genomic data
 
-```{r LoadGenotypeData}
-# File with the genotype names (clone names)
-geno_names <- read.delim2("../../data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
+The genomic dataset contains 523 genotypes and 5,165 SNPs. Missing data were imputed using the most common allele at each SNP within the gene pool.
 
-# File with the genotype of each clone for each SNP
-geno <- read.csv("../../data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
-
-# Removing the first two columns with allele info (A,T, G or C)
-geno <- geno[,3:dim(geno)[[2]]]
-
-# Give the genotype name for each column of geno
-colnames(geno) <- rownames(geno_names)
-
-# Genotypes in rows, SNPs in columns
-geno <- as.data.frame(t(geno))
-
-geno[1:10,1:10]
+```{r LoadGenomicData}
+gen.imp <- readRDS(file="data/GenomicData/5165snps523genotypesImpNA.rds")
 ```
 
-There are 17,263 missing values (~6% of missing values). Like in the [vignette](https://popgen.nescent.org/2018-03-27_RDA_GEA.html), we impute the missing values using the most common genotype at each SNP across all individuals.
-
-```{r NAs}
-sum(is.na(geno)) # 17,263 missing values;  17263/(5165*523) = 0.006390639 => ~ 6% missing values
-
-gen.imp <- apply(geno, 2, function(x) replace(x, is.na(x), as.numeric(names(which.max(table(x))))))
-sum(is.na(gen.imp)) # No NAs
-```
-
-
-According to the [vignette](https://popgen.nescent.org/2018-03-27_RDA_GEA.html), other methods are possible: <span style="color: gray;">"We could also use this imputation approach within ecotypes (rather than across all individuals). Other promising imputation methods for species lacking a reference genome include: using ancestry values from `snmf` in the `LEA` package (Frichot & Francois 2015), using Random Forest (implemented for genomic data in the R package `grur`, Gosselin 2017), and the program LinkImpute (Money et al., 2015)."</span>
 
 ## Environmental and population structure data
 
-```{r LoadEnvData,fig.height=10,fig.width=16}
-env <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+```{r LoadEnvData}
+env <- readRDS(file="data/AllDataPhenoClimSoil.RDS")
 env <- env %>% select(clon,prov,contains("ude_prov"),contains("bio"),contains("top_prov"),"depth_roots_prov", paste0(rep("Q",6),1:6),max.Q)
 colnames(env) <- c("genotype","prov",str_sub(grep("_prov",colnames(env),value=TRUE),1,-6),paste0(rep("Q",6),1:6),"maxgp")
 env <- unique(env)
 env <- env[!(env$prov=="ROD"),]
 
-topo <- readRDS(file="../../data/Topography/DfTopoVarbyProv.rds")
+topo <- readRDS(file="data/Topography/DfTopoVarbyProv.rds")
 topo <- topo %>% dplyr::select(prov,TRI_WGS84_90m_R) %>% 
                  dplyr::rename(TRI=TRI_WGS84_90m_R)
 env <- merge(env,topo,by="prov")
 env
 
-env <- env[env$genotype %in% rownames(geno_names),]
-
-select.env <- c("bio1","bio2","bio12","bio14","water_top","depth_roots","TRI")
-pairs.panels(env[,select.env], scale=T)
-pairs.panels(unique(env[,select.env]), scale=T)
+env <- env[env$genotype %in% rownames(gen.imp),]
 ```
 
-Genotypes are in the same order in `env` and `gen.imp`.
+We run the RDA on four different sets of environemntal variables.
 
-```{r Order}
-identical(rownames(gen.imp), env[,2])
+### Set AvgSand
+
+Topographic variable: `TRI`.
+
+Soil variables:
+
+  - `sand_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing average climatic conditions:
+
+  - `bio1`: annual daily mean temperature (°C)
+  - `bio2`: mean diurnal temperature range (max-min, °C)
+  - `bio12`: annual precipitation (mm)
+  - `bio14`: precipitation of the driest month (mm)
+  
+```{r SetAvgSand,fig.height=9,fig.width=12}
+select.var.AvgSand <- c("bio1","bio2","bio12","bio14","sand_top","depth_roots","TRI")
+pairs.panels(unique(env[,select.var.AvgSand]), scale=T) # unique() here because there is one env. value per provenance
+```
+
+### Set AvgWater
+
+Topographic variable: `TRI`.
+
+Soil variables:
+
+  - `water_top` = Total available water content
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing average climatic conditions:
+
+  - `bio1`: annual daily mean temperature (°C)
+  - `bio2`: mean diurnal temperature range (max-min, °C)
+  - `bio12`: annual precipitation (mm)
+  - `bio14`: precipitation of the driest month (mm)
+  
+```{r SetAvgWater,fig.height=9,fig.width=12}
+select.var.AvgWater <- c("bio1","bio2","bio12","bio14","water_top","depth_roots","TRI")
+pairs.panels(unique(env[,select.var.AvgWater]), scale=T) # unique() here because there is one env. value per provenance
+```
+
+### Set ExtSand
+
+Topographic variable: `TRI`.
+
+Soil variables:
+
+  - `sand_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing episodic events:
+
+  - `bio5`: max temperature of the warmest month (°C)
+  - `bio6`: min temperature of the coldest month (°C)
+  - `bio13`: precipitation of the wettest month (mm)
+  - `bio14`: precipitation of the driest month (mm)
+  
+  
+```{r SetExtSand,fig.height=9,fig.width=12}
+select.var.ExtSand <- c("bio13","bio14","bio5","bio6","sand_top","depth_roots","TRI")
+pairs.panels(unique(env[,select.var.ExtSand]), scale=T)
 ```
 
 
-# RDA not corrected by population structure
 
-## run the RDA
+### Set ExtWater
+
+Topographic variable: `TRI`.
+
+Soil variables:
+
+  - `water_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing episodic events:
+
+  - `bio5`: max temperature of the warmest month (°C)
+  - `bio6`: min temperature of the coldest month (°C)
+  - `bio13`: precipitation of the wettest month (mm)
+  - `bio14`: precipitation of the driest month (mm)
+  
+  
+```{r SetExtWater,fig.height=9,fig.width=12}
+select.var.ExtWater <- c("bio13","bio14","bio5","bio6","water_top","depth_roots","TRI")
+pairs.panels(unique(env[,select.var.ExtWater]), scale=T)
+```
+
+# Set AvgWater
+
+## RDA not corrected by population structure
+
+### run the RDA
 
 <span style="color: gray;">"[...] we highly recommend Borcard et al. (2011) for details on the implementation and interpretation of RDA models and the objects created by vegan. RDA runs relatively quickly on most data sets, however on a very large data set it can take 15-20 minutes, depending on the computer.
 
 Note: if your predictors include any factors, you’ll need to write out the formula in the rda call if you want to include a significance test of the constrained axis. Since we are not using any factors in this analysis, we can use the shorthand formula `gen.imp ~ .`"</span>
 
 
-```{r RDAnocorrectionRun}
-nocorrection.rda <- rda(gen.imp ~ ., data=env[,select.env], scale=T)
+```{r RDAnocorrectionRunAvgWater}
+nocorrection.rda <- rda(gen.imp ~ ., data=env[,select.var.AvgWater], scale=T)
 nocorrection.rda
 ```
 
 <span style="color: gray;">"note that we will have as many constrained (“RDA”) axes as we have predictors in the model. All residual variance is then modeled by PCA (the unconstrained “PC” axes). The proportion of the variance explained by the environmental predictors is given under the “Proportion” column for “Constrained”; this is equivalent to the $\mathcal{R}^{2}$ of a multiple regression. Just like in multiple regression, this $\mathcal{R}^{2}$ will be biased and should be adjusted based on the number of predictors."</span>
 That's why we calculate the adjusted $\mathcal{R}^{2}$ using the function `RsquaredAdj`, as below:
 
-```{r RsquareAdjRDAnocorrection}
+```{r RsquareAdjRDAnocorrectionAvgWater}
 RsquareAdj(nocorrection.rda)
 ```
 
-In our case, the constrained ordination explains about ??% of the variation. <span style="color: gray;">"this low explanatory power is not surprising given that we expect that most of the SNPs in our dataset will not show a relationship with the environmental predictors (e.g., most SNPs will be neutral)."</span>
+In our case, the constrained ordination explains about 9% of the variation. <span style="color: gray;">"this low explanatory power is not surprising given that we expect that most of the SNPs in our dataset will not show a relationship with the environmental predictors (e.g., most SNPs will be neutral)."</span>
 
 <span style="color: gray;">"The eigenvalues for the constrained axes reflect the variance explained by each canonical axis, as shown by the function `summary(eignevals(..., model="constrained"))`."</span>
 
-```{r SummaryEigneValsRDAnocorrection}
+```{r SummaryEigneValsRDAnocorrectionAvgWater}
 summary(eigenvals(nocorrection.rda, model = "constrained"))
 ```
 
 <span style="color: gray;">"We can visualize this information using a screeplot of the canonical eigenvalues by calling `screeplot`:"</span>
 
+<span style="color: gray;">"The screeplot provides an informal (and quick) way to determine how many constrained axes to include when we search for candidate SNPs (below). We could start by investigating RDA axes that explain the most variance (excluding those after the “drop off” point in the screeplot.)</span>
 
-```{r ScreeplotRDAnocorrection}
+```{r ScreeplotRDAnocorrectionAvgWater}
 screeplot(nocorrection.rda)
 ```
 
 
-<span style="color: gray;">"Here, we can see that the first ??? constrained axes explain most of the variance. **The screeplot provides an informal (and quick) way to determine how many constrained axes to include when we search for candidate SNPs (below)**. We could start by investigating RDA axes that explain the most variance (excluding those after the “drop off” point in the screeplot.)
+> The first constrained axis explain most of the variance (53%). 
 
-Now let’s check our RDA model for significance using formal tests. We can assess both the full model and each constrained axis using F-statistics (Legendre et al, 2010). The null hypothesis is that no linear relationship exists between the SNP data and the environmental predictors. See ?anova.cca for more details and options."</span>
+<span style="color: gray;">Now let’s check our RDA model for significance using formal tests. We can assess both the full model and each constrained axis using F-statistics (Legendre et al, 2010). The null hypothesis is that no linear relationship exists between the SNP data and the environmental predictors. See ?anova.cca for more details and options."</span>
 
 
-```{r RDAnocorrectionSigniFull, cache=T}
+```{r RDAnocorrectionSigniFullAvgWater, cache=T}
 signif.full <- anova.cca(nocorrection.rda, parallel=getOption("mc.cores")) # default is permutation=999
 signif.full
 ```
 
+> The full model is significant. 
+
 <span style="color: gray;">"The full model is significant, but that doesn’t tell us much. We can check each constrained axis for significance using the code below. For this test, each constrained axis is tested using all previous constrained axes as conditions. See `?anova.cca` and Legendre et al. (2010) for details. The purpose here is to determine which constrained axes we should investigate for candidate loci. [...] This analysis is time intensive."</span>
 
-All the constrained axes are significant, which is a bit strange.
+`?anova.cca` "Setting by = "axis" will perform separate significance tests for each constrained axis. All previous constrained axes will be used as conditions (“partialled out”) and a test for the first constrained eigenvalues is performed (Legendre et al. 2011). You can stop permutation tests after exceeding a given significance level with argument cutoff to speed up calculations in large models."
 
-`anova.cca` "Setting by = "axis" will perform separate significance tests for each constrained axis. All previous constrained axes will be used as conditions (“partialled out”) and a test for the first constrained eigenvalues is performed (Legendre et al. 2011). You can stop permutation tests after exceeding a given significance level with argument cutoff to speed up calculations in large models."
-
-```{r RDAnocorrectionSigniAxis, cache=T}
+```{r RDAnocorrectionSigniAxisAvgWater, cache=T}
 signif.axis <- anova.cca(nocorrection.rda, by="axis", parallel=getOption("mc.cores"))
 signif.axis
 ```
 
+> All the constrained axes are significant, is it not weird?
+
 <span style="color: gray;">"Finally, `vegan` has a simple function for checking Variance Inflation Factors for the predictor variables used in the model:"</span>
 
-```{r RDAnocorrectionVIF}
+```{r RDAnocorrectionVIFAvgWater}
 vif.cca(nocorrection.rda)
 ```
 
 <span style="color: gray;">"All values are below 10, and most are below 5, which indicates that multicollinearity among these predictors shouldn’t be a problem for the model."</span>
 
-## plot the RDA
+### plot the RDA
 
 <span style="color: gray;">"We’ll start with simple triplots from `vegan`. Here we’ll use scaling=3 (also known as “symmetrical scaling”) for the ordination plots. This scales the SNP and individual scores by the square root of the eigenvalues. See Borcard et al. (2011) or the `vegan` help for more information on scaling in RDA plots."</span>
-
-```{r PlotRDAnocorrectionbasePlots, fig.height=6,fig.width=6}
-plot(nocorrection.rda, scaling=3)          # default is axes 1 and 2
-plot(nocorrection.rda, choices = c(1, 3), scaling=3)  # axes 1 and 3
-```
 
 - <span style="color: red;">The SNPs are the red points in the center of each plot.</span>
 
@@ -206,11 +266,16 @@ plot(nocorrection.rda, choices = c(1, 3), scaling=3)  # axes 1 and 3
 
 - <span style="color: blue;">The blue vectors are the environmental predictors.</span> 
 
+```{r PlotRDAnocorrectionbasePlotsAvgWater, fig.height=6,fig.width=6}
+plot(nocorrection.rda, scaling=3)          # default is axes 1 and 2
+plot(nocorrection.rda, choices = c(1, 3), scaling=3)  # axes 1 and 3
+```
+
 <span style="color: gray;">"The relative arrangement of these items in the ordination space reflects their relationship with the ordination axes, which are linear combinations of the predictor variables."</span>
 
-We are going to make some more informative plots: the **genotypes** points are colored based on the **main gene pool** the belong to.
+> More informative plots: the **genotypes** points are colored based on the **main gene pool** the belong to.
 
-```{r PlotRDAnocorrection, fig.height=8,fig.width=8}
+```{r PlotRDAnocorrectionAvgWater, fig.height=8,fig.width=8}
 levels(env$maxgp) <- c("Northern Africa","Corsica","Central Spain","French Atlantic","Iberian Atlantic","South-eastern Spain")
 GPs <- env$maxgp
 bg <- c("orangered3","gold2","darkorchid3","navyblue","turquoise2","green3") # same colors as in paper 1
@@ -230,11 +295,10 @@ text(nocorrection.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(
 legend("topleft", legend=levels(GPs), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
 ```
 
-> We can clearly see here that the ordination space is driven by population structure. We have to correct RDA by population structure.
+> <span style="color: red;">We can clearly see here that the ordination space is driven by population structure. We have to correct RDA by population structure.</span>
 
-# RDA corrected by population structure
+## RDA corrected by population structure with Moran eigen's vectors
 
-## Correction by Moran eigen's vectors
 
 Here, we run a **partial RDA**, conditionned on distance-based MEMs (dbMEM spatial eigenfunctions) calculated from a geographic distance matrix with the function `dbmem` from the `adespatial` package. See section 2.7 in [Forester et al. (2018)](https://onlinelibrary.wiley.com/doi/full/10.1111/mec.14584).
 
@@ -253,7 +317,7 @@ I have to verify if it is ok how I calculated the Moran eigenvectors here:
 - Here I use the distance-based Moran's eigenvector maps but there are many other possibilities given different values, e.g. PCNM (can be calculated with the function `pcnm` of the `vegan` package), the Moran’s Eigenvectors Maps (provided by the functions `scores.listw` or `mem` of the `adespatial` package. These two functions are exactly identical, both are kept for historical reasons and compatibility)
 
 
-```{r MEMs}
+```{r MEMsAvgWater}
 # Calculate the distance-based MEM with one row per genotype
 #mem <- env %>% select(latitude,longitude) %>% dbmem(MEM.autocor = c("positive"),store.listw = FALSE)
 #env <- bind_cols(env,mem)
@@ -269,11 +333,11 @@ There are 4 MEMs with a positive autocorrelation (MEMs associated to positive ei
 
 ### run the RDA
 
-```{r RDAncorrectionMEMs}
+```{r RDAncorrectionMEMsAvgWater}
 correctionmem.rda <- rda(gen.imp ~ bio1 + bio2 + bio12 + bio14 + water_top + depth_roots + TRI + Condition(MEM1 + MEM2 + MEM3 + MEM4),
-                         data=env[,c(select.env,paste0(rep("MEM",4),1:4))],
+                         data=env[,c(select.var.AvgWater,paste0(rep("MEM",4),1:4))],
                          scale=T)
-# correctionmem.rda <- rda(X=gen.imp ,Y=env[,select.env], Z=mem,scale=T) # same
+# correctionmem.rda <- rda(X=gen.imp ,Y=env[,select.var.AvgWater], Z=mem,scale=T) # same
 correctionmem.rda
 RsquareAdj(correctionmem.rda)
 summary(eigenvals(correctionmem.rda, model = "constrained"))
@@ -282,12 +346,12 @@ screeplot(correctionmem.rda)
 
 ### plot the RDA
 
-```{r PlotRDAcorrectionMEMsbasePlots, fig.height=6,fig.width=6}
+```{r PlotRDAcorrectionMEMsbasePlotsAvgWater, fig.height=6,fig.width=7}
 plot(correctionmem.rda, scaling=3)          # default is axes 1 and 2
 plot(correctionmem.rda, choices = c(1, 3), scaling=3)  # axes 1 and 3
 ```
 
-```{r PlotRDAcorrectionMEMs, fig.height=8,fig.width=8}
+```{r PlotRDAcorrectionMEMsAvgWater, fig.height=8,fig.width=8}
 levels(env$maxgp) <- c("Northern Africa","Corsica","Central Spain","French Atlantic","Iberian Atlantic","South-eastern Spain")
 GPs <- env$maxgp
 bg <- c("orangered3","gold2","darkorchid3","navyblue","turquoise2","green3") # same colors as in paper 1
@@ -307,46 +371,45 @@ text(correctionmem.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c
 legend("topleft", legend=levels(GPs), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
 ```
 
-> We can see that the population structure is not well taken into account with the distance-based Moran's eigenvector maps.
+> <span style="color: red;">We can see that the population structure is not well taken into account with the distance-based Moran's eigenvector maps.</span>
 
-## Correction by the ancestry coefficients
-
+## RDA corrected by the population structure with the ancestry coefficients
 
 ### run the RDA
 
-```{r RDAncorrectionGPs}
-correctiongp.rda <- rda(gen.imp ~ bio1 + bio2 + bio12 + bio14 + water_top + depth_roots + TRI + Condition(Q1 + Q2 + Q3 + Q4 + Q4 + Q5), data=env[,c(select.env,paste0(rep("Q",5),1:5))], scale=T)
-# correctiongp.rda <- rda(X=gen.imp ,Y=env[,select.env], Z=env[,paste0(rep("Q",6),1:6)],scale=T)  # Same as the line beofre, but if I use this formulation, I can't use annova.cca by "axis".
+```{r RDAncorrectionGPsAvgWater}
+correctiongp.rda <- rda(gen.imp ~ bio1 + bio2 + bio12 + bio14 + water_top + depth_roots + TRI + Condition(Q1 + Q2 + Q3 + Q4 + Q4 + Q5), data=env[,c(select.var.AvgWater,paste0(rep("Q",5),1:5))], scale=T)
+# correctiongp.rda <- rda(X=gen.imp ,Y=env[,select.var.AvgWater], Z=env[,paste0(rep("Q",6),1:6)],scale=T)  # Same as the line beofre, but if I use this formulation, I can't use annova.cca by "axis".
 correctiongp.rda
 RsquareAdj(correctiongp.rda)
 summary(eigenvals(correctiongp.rda, model = "constrained"))
 screeplot(correctiongp.rda)
 ```
 
-```{r RDAcorrectionGPsSigniFull, cache=T}
+```{r RDAcorrectionGPsSigniFullAvgWater, cache=T}
 signif.full <- anova.cca(correctiongp.rda, parallel=getOption("mc.cores")) # default is permutation=999
 signif.full
 ```
 
-```{r RDAcorrectionGPsSigniAxis, cache=T}
+```{r RDAcorrectionGPsSigniAxisAvgWater, cache=T}
 signif.axis <- vegan::anova.cca(correctiongp.rda,by="axis", parallel=getOption("mc.cores"))
 signif.axis
 ```
 
-All axis are aignificant! 
+> All axes are significant! 
 
-```{r RDAcorrectionGPsVIF}
+```{r RDAcorrectionGPsVIFAvgWater}
 vif.cca(correctiongp.rda)
 ```
 
 ### plot the RDA
 
-```{r PlotRDAcorrectionGPsbasePlots, fig.height=6,fig.width=6}
+```{r PlotRDAcorrectionGPsbasePlotsAvgWater, fig.height=6,fig.width=8}
 plot(correctiongp.rda, scaling=3)          # default is axes 1 and 2
 plot(correctiongp.rda, choices = c(1, 3), scaling=3)  # axes 1 and 3
 ```
 
-```{r PlotRDAcorrectionGPs, fig.height=10,fig.width=10}
+```{r PlotRDAcorrectionGPsAvgWater, fig.height=10,fig.width=10}
 levels(env$maxgp) <- c("Northern Africa",
                        "Corsica",
                        "Central Spain",
@@ -378,23 +441,29 @@ legend("topright", legend=levels(GPs), bty="n", col="gray32", pch=21, cex=1, pt.
 
 ### Identify the candidate SNPs
 
-**SNP loadings** in the ordination space (stored as `species` in the RDA object) are used to determine which SNPs are **candidates for local adaptation**. SNP loadings are extracted from the ??? significant constrained axes. Second, we use histograms of the loadings on each RDA axis to look at their (relatively normal) distributions. 
+**SNP loadings** in the ordination space (stored as `species` in the RDA object) are used to determine which SNPs are **candidates for local adaptation**. SNP loadings are extracted from the significant constrained axes. Second, we use histograms of the loadings on each RDA axis to look at their (relatively normal) distributions. 
 
 <span style="color: gray;">"SNPs loadings at the center of the distribution are not showing a relationship with the environmental predictors; those loading in the tails are, and are more likely to be under selection as a function of those predictors (or some other predictor correlated with them)."</span>
 
-```{r LoadingsSnpsRDAcorrectionGPs,fig.width=10}
+```{r LoadingsSnpsRDAcorrectionGPsAvgWater,fig.width=16,fig.height=4}
 par(mfrow=c(1,3))
 load.correctiongp.rda <- scores(correctiongp.rda, choices=c(1:7), display="species")  # Species scores for the seven constrained axes (all significant)
-hist(load.correctiongp.rda[,1], main="Loadings on RDA1")
-hist(load.correctiongp.rda[,2], main="Loadings on RDA2")
-hist(load.correctiongp.rda[,3], main="Loadings on RDA3") 
+hist(load.correctiongp.rda[,1], main="Loadings on RDA1",xlab="",ylab="Frequency")
+hist(load.correctiongp.rda[,2], main="Loadings on RDA2",xlab="",ylab="")
+hist(load.correctiongp.rda[,3], main="Loadings on RDA3",xlab="",ylab="") 
+hist(load.correctiongp.rda[,1], main="Loadings on RDA4",xlab="",ylab="Frequency")
+hist(load.correctiongp.rda[,2], main="Loadings on RDA5",xlab="",ylab="")
+hist(load.correctiongp.rda[,3], main="Loadings on RDA6",xlab="",ylab="") 
+hist(load.correctiongp.rda[,3], main="Loadings on RDA7",xlab="",ylab="Frequency") 
 ```
 
 Here is a function <span style="color: gray;">"to identify SNPs that load in the tails of these distributions. We’ll start with a 3 standard deviation cutoff (two-tailed p-value = 0.0027). As with all cutoffs, this can be modified to reflect the goals of the analysis and our tolerance for true positives vs. false positives. For example, if you needed to be very conservative and only identify those loci under very strong selection (i.e., minimize false positive rates), you could increase the number of standard deviations to 3.5 (two-tailed p-value = 0.0005). This would also increase the false negative rate. If you were less concerned with false positives, and more concerned with identifying as many potential candidate loci as possible (including those that may be under weaker selection), you might choose a 2.5 standard deviation cutoff (two-tailed p-value = 0.012)."</span>
 
-> To discuss with Santi and Marta here, which threshold do we choose?
+Santi: "I would stick to 3 standard deviation cutoff, it seems a reasonable number to me."
 
-```{r FunctionIdentifySNPs}
+> <span style="color: red;">In the article, we use a 3 standard deviation cutoff (two-tailed p-value = 0.0027) to identify SNPs that load in the tails of these distributions.</span>
+
+```{r FunctionIdentifySNPsAvgWater}
 # x is the vector of loadings and z is the number of standard deviations to use:
 outliers <- function(x,z){
   lims <- mean(x) + c(-1, 1) * z * sd(x)     # find loadings +/-z sd from mean loading     
@@ -404,7 +473,7 @@ outliers <- function(x,z){
 
 <span style="color: gray;">"Now let’s apply it to each significant constrained axis:"</span>
 
-```{r ApplyFunctionSigniConstrainedAxis}
+```{r ApplyFunctionSigniConstrainedAxisAvgWater}
 cand1 <- outliers(load.correctiongp.rda[,1],3) # 52 candidate SNPs on axis 1
 cand2 <- outliers(load.correctiongp.rda[,2],3) # 19 candidate SNPs on axis 2
 cand3 <- outliers(load.correctiongp.rda[,3],3) # 27 candidate SNPs on axis 3
@@ -414,12 +483,14 @@ cand6 <- outliers(load.correctiongp.rda[,6],3) # 18 candidate SNPs on axis 6
 cand7 <- outliers(load.correctiongp.rda[,7],3) # 26 candidate SNPs on axis 7
 
 ncand <- length(cand1) + length(cand2) + length(cand3) + length(cand4) + length(cand5) + length(cand6) + length(cand7)
-ncand # 188 candidates SNPs in total !
+ncand
 ```
+> <span style="color: red;">189 candidates SNPs in total.</span>
+
 
 Let's build a data frame with the axis, SNP name, loading, & correlation with each predictor:
 
-```{r DFRDAcorrectionGPs}
+```{r DFRDAcorrectionGPsAvgWater}
 cand1 <- cbind.data.frame(rep(1,times=length(cand1)), names(cand1), unname(cand1))
 cand2 <- cbind.data.frame(rep(2,times=length(cand2)), names(cand2), unname(cand2))
 cand3 <- cbind.data.frame(rep(3,times=length(cand3)), names(cand3), unname(cand3))
@@ -436,53 +507,62 @@ cand$snp <- as.character(cand$snp)
 
 <span style="color: gray;">"Let’s add in the correlations of each candidate SNP with the eight environmental predictors:"</span>
 
-```{r CorrelationPredictorsRDAcorrectionGPs}
-foo <- matrix(nrow=(ncand), ncol=length(select.env))  # 8 columns for 8 predictors
-colnames(foo) <- select.env
+```{r CorrelationPredictorsRDAcorrectionGPsAvgWater}
+foo <- matrix(nrow=(ncand), ncol=length(select.var.AvgWater))
+colnames(foo) <- select.var.AvgWater
 
 for (i in 1:length(cand$snp)) {
   nam <- cand[i,2]
   snp.gen <- gen.imp[,nam]
-  foo[i,] <- apply(env[,select.env],2,function(x) cor(x,snp.gen))
+  foo[i,] <- apply(env[,select.var.AvgWater],2,function(x) cor(x,snp.gen))
 }
 
 cand <- cbind.data.frame(cand,foo)  
-head(cand)
+head(cand) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
 ```
 
-Now we have a data frame of 188 candidate SNPs and their correlation with our 7 environmental predictors.
+Now we have a data frame of 189 candidate SNPs and their correlation with our 7 environmental predictors.
 
 
-### Investigate the candidates
+
+### Removing the duplicates
 
 <span style="color: gray;">"We’ll start off by looking for duplicate detections. These are SNPs that are identified as candidates on more than one RDA axis."</span>
 
-```{r DuplicatesRDAcorrectionGPs}
-length(cand$snp[duplicated(cand$snp)])  # 5 duplicate detections
+```{r DuplicatesRDAcorrectionGPsAvgWater}
+length(cand$snp[duplicated(cand$snp)])  # 4 duplicate detections
 cand <- cand[!duplicated(cand$snp),] # remove duplicate detections
+nrow(cand)
 ```
 
-```{r SaveCandidateSNPs}
-saveRDS(cand,file="../../outputs/CandidateSNPs/183SNPsRDA.rds")
+> 4 duplicates, 185 remaining candidate SNPs.
+
+```{r SaveCandidateSNPsAvgWater}
+saveRDS(cand,file=paste0("outputs/CandidateSNPs/rda/",nrow(cand),"CandSNPsRDA_AvgWater.rds"))
 ```
 
+We can calculate the genomic offset of this set of SNPs and see whether it is different from that of the other SNPs.
+
+### Main predictor for each SNP
 
 Which of the predictors each candidate SNP is most strongly correlated with?
 
-```{r WhichPredictorsMostCorrCandidatesRDAcorrectionGPs}
+```{r WhichPredictorsMostCorrCandidatesRDAcorrectionGPsAvgWater}
 for (i in 1:length(cand$snp)) {
   bar <- cand[i,]
-  cand[i,(3+length(select.env)+1)] <- names(which.max(abs(bar[4:(3+length(select.env))]))) # gives the variable
-  cand[i,(3+length(select.env)+2)] <- max(abs(bar[4:(3+length(select.env))]))              # gives the correlation
+  cand[i,(3+length(select.var.AvgWater)+1)] <- names(which.max(abs(bar[4:(3+length(select.var.AvgWater))]))) # gives the variable
+  cand[i,(3+length(select.var.AvgWater)+2)] <- max(abs(bar[4:(3+length(select.var.AvgWater))]))              # gives the correlation
 }
 
-colnames(cand)[(3+length(select.env)+1)] <- "predictor"
-colnames(cand)[(3+length(select.env)+2)] <- "correlation"
+colnames(cand)[(3+length(select.var.AvgWater)+1)] <- "predictor"
+colnames(cand)[(3+length(select.var.AvgWater)+2)] <- "correlation"
 
 table(cand$predictor) 
 ```
 
-Lots of SNPs are associated with `bio2` describing the continentality (mean diurnal temperature range). A lot are also associated with precipitation-related variables (`bio12`, `bio14` and `water_top`).
+Lots of SNPs are mainly associated with `bio2` describing the continentality (mean diurnal temperature range). A lot are also mainly associated with precipitation-related variables (`bio12`, `bio14` and `water_top`).
 
 <span style="color: gray;">"Note that, in some cases, correlations may be strong for multiple variables (depending on collinearity among predictors). It may be useful to consider how candidate SNPs are correlated with multiple predictors. We could, for example, look at the cand object and investigate correlations with predictors other than the predictor with the highest correlation coefficient. However, for this analysis we will focus on the strongest correlations of each SNP with one predictor."</span>
 
@@ -491,7 +571,7 @@ Lots of SNPs are associated with `bio2` describing the continentality (mean diur
 
 <span style="color: gray;">"Let’s look at RDA plots again, but this time focus in on the SNPs in the ordination space. We’ll color code the SNPs based on the predictor variable that they are most strongly correlated with."</span>
 
-```{r PrepPlotSNPsRDAcorrectionGPs}
+```{r PrepPlotSNPsRDAcorrectionGPsAvgWater}
 sel <- cand$snp
 predictor <- cand$predictor
 predictor[predictor=="depth_roots"] <- '#1f78b4'
@@ -518,19 +598,766 @@ empty.outline <- ifelse(empty=="#00FF0000","#00FF0000","gray32")
 bg <- c('#1f78b4','#a6cee3','#6a3d9a','#e31a1c','#33a02c','#ffff33','#fb9a99')
 ```
 
-```{r PlotSNPsRDAcorrectionGPs, fig.height=8,fig.width=8}
+```{r PlotSNPsRDAcorrectionGPsAvgWater, fig.height=8,fig.width=8}
 # axes 1 & 2
 plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1))
 points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3)
 points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3)
 text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1)
-legend("topleft", legend=select.env, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+legend("topleft", legend=select.var.AvgWater, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
 
 # axes 1 & 3
 plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(1,3))
 points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3, choices=c(1,3))
 points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(1,3))
 text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
-legend("bottomright", legend=select.env, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+legend("bottomright", legend=select.var.AvgWater, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
 ```
+
+**Comments from Santi:**
+
+**- "Notice that when correcting using ancestry, the eigenvalues are more similar, meaning that there is not one that is much higher than the others, as in the case of runs not correcting by pop structure."**
+
+**- "SNPs are still quite spread, i.e. not so close from the variable axes, which probably means weak selection or correlation with more than one factor."**
+
+
+
+### Drought-associated candidates
+
+> We are going to subset the SNPs associated with the precipitation of the driest month (`bio14`). This set of SNPs will then be used in the validation part: the "drought-resistant" alleles of these SNPs are expected to increase in frequency after the selection event in Caceres. 
+
+We will refer to these SNPs as the drought-associated candidates (`dacand`).
+
+We arbitrarily choose the threshold of $abs(\rho)>0.1$ with $\rho$ corresponding to the correlation coefficient of the candidate SNPs with the precipitation of the driest month (`bio14`).
+
+```{r SubsetDroughtAssociatedCandidatesAvgWater}
+dacand <- cand[abs(cand$bio14)>0.1,]
+nrow(dacand)
+nrow(dacand[abs(dacand$bio14)>0.3,])
+```
+
+> There are 125 drought-associated candidate SNPs with a coeff higher than 0.1 and 21 with a beta coeff higher than 0.3.
+
+
+```{r PrepPlotDaCandSNPsRDAcorrectionGPsAvgWater}
+sel <- dacand$snp
+predictor <- rep('#e31a1c',length(sel))
+
+# color by predictor:
+col.pred <- rownames(correctiongp.rda$CCA$v) # pull the SNP names
+
+for (i in 1:length(sel)) {           # color code candidate SNPs
+  foo <- match(sel[i],col.pred)
+  col.pred[foo] <- predictor[i]
+}
+
+col.pred[grep("SNP",col.pred)] <- '#f1eef6' # non-candidate SNPs
+empty <- col.pred
+empty[grep("#f1eef6",empty)] <- rgb(0,1,0, alpha=0) # transparent
+empty.outline <- ifelse(empty=="#00FF0000","#00FF0000","gray32")
+bg <- '#e31a1c'
+```
+
+```{r PlotDACandSNPsRDAcorrectionGPsAvgWater, fig.height=8,fig.width=8}
+# axes 1 & 2
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3)
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3)
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1)
+legend("topleft", legend="Drought-associated candidates", bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+
+# axes 1 & 3
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(1,3))
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("topleft", legend="Drought-associated candidates", bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+```
+
+```{r SaveDaCandidateSNPsAvgWater}
+saveRDS(dacand,file=paste0("outputs/CandidateSNPs/rda/",nrow(dacand),"DaCandSNPsRDA.rds"))
+```
+
+### Continentality-associated candidates
+
+> We are going to subset the SNPs associated with the mean diurnal temperature range (`bio2`) to compare with the outputs from <span style="font-variant:small-caps;">BayPass</span>. In the <span style="font-variant:small-caps;">BayPass</span> analyses, only SNPs associated with `bio2` show BF > 20dB. 
+
+We will refer to these SNPs as the continentality-associated candidates (`cacand`).
+
+We arbitrarily choose the threshold of $abs(\rho)>0.1$ with $\rho$ corresponding to the correlation coefficient of the candidate SNPs with the mean diurnal temperature range (`bio2`).
+
+```{r SubsetContinentalityAssociatedCandidatesAvgWater}
+cacand <- cand[abs(cand$bio2)>0.1,]
+nrow(cacand)
+nrow(cacand[abs(cacand$bio2)>0.3,])
+```
+
+> There are 118 drought-associated candidate SNPs.
+
+```{r PrepPlotCaCandSNPsRDAcorrectionGPsAvgWater}
+sel <- cacand$snp
+predictor <- rep('#6a3d9a',length(sel))
+
+# color by predictor:
+col.pred <- rownames(correctiongp.rda$CCA$v) # pull the SNP names
+
+for (i in 1:length(sel)) {           # color code candidate SNPs
+  foo <- match(sel[i],col.pred)
+  col.pred[foo] <- predictor[i]
+}
+
+col.pred[grep("SNP",col.pred)] <- '#f1eef6' # non-candidate SNPs
+empty <- col.pred
+empty[grep("#f1eef6",empty)] <- rgb(0,1,0, alpha=0) # transparent
+empty.outline <- ifelse(empty=="#00FF0000","#00FF0000","gray32")
+bg <- '#6a3d9a'
+```
+
+```{r PlotCACandSNPsRDAcorrectionGPsAvgWater, fig.height=8,fig.width=8}
+# axes 1 & 2
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3)
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3)
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1)
+legend("topleft", legend="Continentality-associated candidates", bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+
+# axes 1 & 3
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(1,3))
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("topleft", legend="Continentality-associated candidates", bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+```
+
+```{r SaveCaCandidateSNPsAvgWater}
+saveRDS(dacand,file=paste0("outputs/CandidateSNPs/rda/",nrow(dacand),"CaCandSNPsRDA.rds"))
+```
+
+### Sum-up candidates
+
+```{r SumUpCandidateNumberAvgWater}
+DF <- data.frame(threshold=c(0.1,0.3), 
+                 bio1=c(nrow(cand[abs(cand$bio1)>0.1,]),
+                        nrow(cand[abs(cand$bio1)>0.3,])),
+                 bio2=c(nrow(cand[abs(cand$bio2)>0.1,]),
+                        nrow(cand[abs(cand$bio2)>0.3,])),
+                 bio12=c(nrow(cand[abs(cand$bio12)>0.1,]),
+                        nrow(cand[abs(cand$bio12)>0.3,])),
+                 bio14=c(nrow(cand[abs(cand$bio14)>0.1,]),
+                        nrow(cand[abs(cand$bio14)>0.3,])),
+                 water_top=c(nrow(cand[abs(cand$water_top)>0.1,]),
+                        nrow(cand[abs(cand$water_top)>0.3,])),
+                 depth_roots=c(nrow(cand[abs(cand$depth_roots)>0.1,]),
+                        nrow(cand[abs(cand$depth_roots)>0.3,])),
+                 TRI=c(nrow(cand[abs(cand$TRI)>0.1,]),
+                        nrow(cand[abs(cand$TRI)>0.3,])))
+DF %>% 
+  kable() %>%  
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+# Set AvgSand 
+
+## RDA corrected by population structure with the ancestry coefficients
+
+### run the RDA
+
+```{r RDAncorrectionGPsAvgSand}
+correctiongp.rda <- rda(gen.imp ~ bio1 + bio2 + bio12 + bio14 + sand_top + depth_roots + TRI + Condition(Q1 + Q2 + Q3 + Q4 + Q4 + Q5), data=env[,c(select.var.AvgSand,paste0(rep("Q",5),1:5))], scale=T)
+correctiongp.rda
+RsquareAdj(correctiongp.rda)
+summary(eigenvals(correctiongp.rda, model = "constrained"))
+screeplot(correctiongp.rda)
+```
+
+```{r RDAcorrectionGPsSigniFullAvgSand, cache=T}
+signif.full <- anova.cca(correctiongp.rda, parallel=getOption("mc.cores")) # default is permutation=999
+signif.full
+```
+
+```{r RDAcorrectionGPsSigniAxisAvgSand, cache=T}
+signif.axis <- vegan::anova.cca(correctiongp.rda,by="axis", parallel=getOption("mc.cores"))
+signif.axis
+```
+
+> All axes are significant! 
+
+```{r RDAcorrectionGPsVIFAvgSand}
+vif.cca(correctiongp.rda)
+```
+
+#### plot the RDA
+
+```{r PlotRDAcorrectionGPsbasePlotsAvgSand, fig.height=6,fig.width=8}
+plot(correctiongp.rda, scaling=3)          # default is axes 1 and 2
+plot(correctiongp.rda, choices = c(1, 3), scaling=3)  # axes 1 and 3
+```
+
+```{r PlotRDAcorrectionGPsAvgSand, fig.height=10,fig.width=10}
+levels(env$maxgp) <- c("Northern Africa",
+                       "Corsica",
+                       "Central Spain",
+                       "French Atlantic",
+                       "Iberian Atlantic",
+                       "South-eastern Spain")
+GPs <- env$maxgp
+bg <- c("orangered3",
+        "gold2",
+        "darkorchid3",
+        "navyblue",
+        "turquoise2",
+        "green3") # same colors as in paper 1
+
+# axes 1 & 2
+plot(correctiongp.rda, type="n", scaling=3)
+points(correctiongp.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3)           # the SNPs
+points(correctiongp.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[GPs]) # the genotypes
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1)                           # the predictors
+legend("bottomright", legend=levels(GPs), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+
+# axes 1 & 3
+plot(correctiongp.rda, type="n", scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[GPs], choices=c(1,3))
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("topright", legend=levels(GPs), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+```
+
+#### Identify the candidate SNPs
+
+```{r LoadingsSnpsRDAcorrectionGPsAvgSand,fig.width=16,fig.height=4}
+par(mfrow=c(1,3))
+load.correctiongp.rda <- scores(correctiongp.rda, choices=c(1:7), display="species")  # Species scores for the seven constrained axes (all significant)
+hist(load.correctiongp.rda[,1], main="Loadings on RDA1",xlab="",ylab="Frequency")
+hist(load.correctiongp.rda[,2], main="Loadings on RDA2",xlab="",ylab="")
+hist(load.correctiongp.rda[,3], main="Loadings on RDA3",xlab="",ylab="") 
+hist(load.correctiongp.rda[,1], main="Loadings on RDA4",xlab="",ylab="Frequency")
+hist(load.correctiongp.rda[,2], main="Loadings on RDA5",xlab="",ylab="")
+hist(load.correctiongp.rda[,3], main="Loadings on RDA6",xlab="",ylab="") 
+hist(load.correctiongp.rda[,3], main="Loadings on RDA7",xlab="",ylab="Frequency") 
+```
+
+```{r ApplyFunctionSigniConstrainedAxisAvgSand}
+cand1 <- outliers(load.correctiongp.rda[,1],3) # 52 candidate SNPs on axis 1
+cand2 <- outliers(load.correctiongp.rda[,2],3) # 19 candidate SNPs on axis 2
+cand3 <- outliers(load.correctiongp.rda[,3],3) # 27 candidate SNPs on axis 3
+cand4 <- outliers(load.correctiongp.rda[,4],3) # 27 candidate SNPs on axis 4
+cand5 <- outliers(load.correctiongp.rda[,5],3) # 19 candidate SNPs on axis 5
+cand6 <- outliers(load.correctiongp.rda[,6],3) # 18 candidate SNPs on axis 6
+cand7 <- outliers(load.correctiongp.rda[,7],3) # 26 candidate SNPs on axis 7
+
+ncand <- length(cand1) + length(cand2) + length(cand3) + length(cand4) + length(cand5) + length(cand6) + length(cand7)
+ncand
+```
+
+> <span style="color: red;">180 candidates SNPs in total.</span>
+
+```{r DFRDAcorrectionGPsAvgSand}
+cand1 <- cbind.data.frame(rep(1,times=length(cand1)), names(cand1), unname(cand1))
+cand2 <- cbind.data.frame(rep(2,times=length(cand2)), names(cand2), unname(cand2))
+cand3 <- cbind.data.frame(rep(3,times=length(cand3)), names(cand3), unname(cand3))
+cand4 <- cbind.data.frame(rep(4,times=length(cand4)), names(cand4), unname(cand4))
+cand5 <- cbind.data.frame(rep(5,times=length(cand5)), names(cand5), unname(cand5))
+cand6 <- cbind.data.frame(rep(6,times=length(cand6)), names(cand6), unname(cand6))
+cand7 <- cbind.data.frame(rep(7,times=length(cand7)), names(cand7), unname(cand7))
+
+colnames(cand1) <- colnames(cand2) <- colnames(cand3) <- colnames(cand4) <- colnames(cand5) <- colnames(cand6) <- colnames(cand7) <- c("axis","snp","loading")
+
+cand <- rbind(cand1, cand2, cand3,cand4,cand5,cand6,cand7)
+cand$snp <- as.character(cand$snp)
+```
+
+```{r CorrelationPredictorsRDAcorrectionGPsAvgSand}
+foo <- matrix(nrow=(ncand), ncol=length(select.var.AvgSand))
+colnames(foo) <- select.var.AvgSand
+
+for (i in 1:length(cand$snp)) {
+  nam <- cand[i,2]
+  snp.gen <- gen.imp[,nam]
+  foo[i,] <- apply(env[,select.var.AvgSand],2,function(x) cor(x,snp.gen))
+}
+
+cand <- cbind.data.frame(cand,foo)  
+head(cand) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+
+#### Removing the duplicates
+
+```{r DuplicatesRDAcorrectionGPsAvgSand}
+length(cand$snp[duplicated(cand$snp)])  # 4 duplicate detections
+cand <- cand[!duplicated(cand$snp),] # remove duplicate detections
+nrow(cand)
+```
+
+> 3 duplicates, 177 remaining candidate SNPs.
+
+```{r SaveCandidateSNPsAvgSand}
+saveRDS(cand,file=paste0("outputs/CandidateSNPs/rda/",nrow(cand),"CandSNPsRDA_AvgSand.rds"))
+```
+
+#### Main predictor for each SNP
+
+```{r WhichPredictorsMostCorrCandidatesRDAcorrectionGPsAvgSand}
+for (i in 1:length(cand$snp)) {
+  bar <- cand[i,]
+  cand[i,(3+length(select.var.AvgSand)+1)] <- names(which.max(abs(bar[4:(3+length(select.var.AvgSand))]))) # gives the variable
+  cand[i,(3+length(select.var.AvgSand)+2)] <- max(abs(bar[4:(3+length(select.var.AvgSand))]))              # gives the correlation
+}
+
+colnames(cand)[(3+length(select.var.AvgSand)+1)] <- "predictor"
+colnames(cand)[(3+length(select.var.AvgSand)+2)] <- "correlation"
+
+table(cand$predictor) 
+```
+
+#### Plot the SNPs
+
+```{r PrepPlotSNPsRDAcorrectionGPsAvgSand}
+sel <- cand$snp
+predictor <- cand$predictor
+predictor[predictor=="depth_roots"] <- '#1f78b4'
+predictor[predictor=="bio12"] <- '#a6cee3'
+predictor[predictor=="bio2"] <- '#6a3d9a'
+predictor[predictor=="bio14"] <- '#e31a1c'
+predictor[predictor=="bio1"] <- '#33a02c'
+predictor[predictor=="sand_top"] <- '#ffff33'
+predictor[predictor=="TRI"] <- '#fb9a99'
+
+# color by predictor:
+col.pred <- rownames(correctiongp.rda$CCA$v) # pull the SNP names
+
+for (i in 1:length(sel)) {           # color code candidate SNPs
+  foo <- match(sel[i],col.pred)
+  col.pred[foo] <- predictor[i]
+}
+
+col.pred[grep("SNP",col.pred)] <- '#f1eef6' # non-candidate SNPs
+empty <- col.pred
+empty[grep("#f1eef6",empty)] <- rgb(0,1,0, alpha=0) # transparent
+empty.outline <- ifelse(empty=="#00FF0000","#00FF0000","gray32")
+bg <- c('#1f78b4','#a6cee3','#6a3d9a','#e31a1c','#33a02c','#ffff33','#fb9a99')
+```
+
+```{r PlotSNPsRDAcorrectionGPsAvgSand, fig.height=8,fig.width=8}
+# axes 1 & 2
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3)
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3)
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1)
+legend("topleft", legend=select.var.AvgSand, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+
+# axes 1 & 3
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(1,3))
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("bottomright", legend=select.var.AvgSand, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+```
+
+# Set ExtSand 
+
+## RDA corrected by population structure with the ancestry coefficients
+
+### run the RDA
+
+```{r RDAncorrectionGPsExtSand}
+correctiongp.rda <- rda(gen.imp ~ bio5 + bio6 + bio13 + bio14 + sand_top + depth_roots + TRI + Condition(Q1 + Q2 + Q3 + Q4 + Q4 + Q5), data=env[,c(select.var.ExtSand,paste0(rep("Q",5),1:5))], scale=T)
+correctiongp.rda
+RsquareAdj(correctiongp.rda)
+summary(eigenvals(correctiongp.rda, model = "constrained"))
+screeplot(correctiongp.rda)
+```
+
+```{r RDAcorrectionGPsSigniFullExtSand, cache=T}
+signif.full <- anova.cca(correctiongp.rda, parallel=getOption("mc.cores")) # default is permutation=999
+signif.full
+```
+
+```{r RDAcorrectionGPsSigniAxisExtSand, cache=T}
+signif.axis <- vegan::anova.cca(correctiongp.rda,by="axis", parallel=getOption("mc.cores"))
+signif.axis
+```
+
+> All axes are significant! 
+
+```{r RDAcorrectionGPsVIFExtSand}
+vif.cca(correctiongp.rda)
+```
+
+#### plot the RDA
+
+```{r PlotRDAcorrectionGPsbasePlotsExtSand, fig.height=6,fig.width=8}
+plot(correctiongp.rda, scaling=3)          # default is axes 1 and 2
+plot(correctiongp.rda, choices = c(1, 3), scaling=3)  # axes 1 and 3
+```
+
+```{r PlotRDAcorrectionGPsExtSand, fig.height=10,fig.width=10}
+levels(env$maxgp) <- c("Northern Africa",
+                       "Corsica",
+                       "Central Spain",
+                       "French Atlantic",
+                       "Iberian Atlantic",
+                       "South-eastern Spain")
+GPs <- env$maxgp
+bg <- c("orangered3",
+        "gold2",
+        "darkorchid3",
+        "navyblue",
+        "turquoise2",
+        "green3") # same colors as in paper 1
+
+# axes 1 & 2
+plot(correctiongp.rda, type="n", scaling=3)
+points(correctiongp.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3)           # the SNPs
+points(correctiongp.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[GPs]) # the genotypes
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1)                           # the predictors
+legend("bottomright", legend=levels(GPs), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+
+# axes 1 & 3
+plot(correctiongp.rda, type="n", scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[GPs], choices=c(1,3))
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("topright", legend=levels(GPs), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+```
+
+#### Identify the candidate SNPs
+
+```{r LoadingsSnpsRDAcorrectionGPsExtSand,fig.width=16,fig.height=4}
+par(mfrow=c(1,3))
+load.correctiongp.rda <- scores(correctiongp.rda, choices=c(1:7), display="species")  # Species scores for the seven constrained axes (all significant)
+hist(load.correctiongp.rda[,1], main="Loadings on RDA1",xlab="",ylab="Frequency")
+hist(load.correctiongp.rda[,2], main="Loadings on RDA2",xlab="",ylab="")
+hist(load.correctiongp.rda[,3], main="Loadings on RDA3",xlab="",ylab="") 
+hist(load.correctiongp.rda[,1], main="Loadings on RDA4",xlab="",ylab="Frequency")
+hist(load.correctiongp.rda[,2], main="Loadings on RDA5",xlab="",ylab="")
+hist(load.correctiongp.rda[,3], main="Loadings on RDA6",xlab="",ylab="") 
+hist(load.correctiongp.rda[,3], main="Loadings on RDA7",xlab="",ylab="Frequency") 
+```
+
+```{r ApplyFunctionSigniConstrainedAxisExtSand}
+cand1 <- outliers(load.correctiongp.rda[,1],3) # 52 candidate SNPs on axis 1
+cand2 <- outliers(load.correctiongp.rda[,2],3) # 19 candidate SNPs on axis 2
+cand3 <- outliers(load.correctiongp.rda[,3],3) # 27 candidate SNPs on axis 3
+cand4 <- outliers(load.correctiongp.rda[,4],3) # 27 candidate SNPs on axis 4
+cand5 <- outliers(load.correctiongp.rda[,5],3) # 19 candidate SNPs on axis 5
+cand6 <- outliers(load.correctiongp.rda[,6],3) # 18 candidate SNPs on axis 6
+cand7 <- outliers(load.correctiongp.rda[,7],3) # 26 candidate SNPs on axis 7
+
+ncand <- length(cand1) + length(cand2) + length(cand3) + length(cand4) + length(cand5) + length(cand6) + length(cand7)
+ncand
+```
+
+> <span style="color: red;">174 candidates SNPs in total.</span>
+
+```{r DFRDAcorrectionGPsExtSand}
+cand1 <- cbind.data.frame(rep(1,times=length(cand1)), names(cand1), unname(cand1))
+cand2 <- cbind.data.frame(rep(2,times=length(cand2)), names(cand2), unname(cand2))
+cand3 <- cbind.data.frame(rep(3,times=length(cand3)), names(cand3), unname(cand3))
+cand4 <- cbind.data.frame(rep(4,times=length(cand4)), names(cand4), unname(cand4))
+cand5 <- cbind.data.frame(rep(5,times=length(cand5)), names(cand5), unname(cand5))
+cand6 <- cbind.data.frame(rep(6,times=length(cand6)), names(cand6), unname(cand6))
+cand7 <- cbind.data.frame(rep(7,times=length(cand7)), names(cand7), unname(cand7))
+
+colnames(cand1) <- colnames(cand2) <- colnames(cand3) <- colnames(cand4) <- colnames(cand5) <- colnames(cand6) <- colnames(cand7) <- c("axis","snp","loading")
+
+cand <- rbind(cand1, cand2, cand3,cand4,cand5,cand6,cand7)
+cand$snp <- as.character(cand$snp)
+```
+
+```{r CorrelationPredictorsRDAcorrectionGPsExtSand}
+foo <- matrix(nrow=(ncand), ncol=length(select.var.ExtSand))
+colnames(foo) <- select.var.ExtSand
+
+for (i in 1:length(cand$snp)) {
+  nam <- cand[i,2]
+  snp.gen <- gen.imp[,nam]
+  foo[i,] <- apply(env[,select.var.ExtSand],2,function(x) cor(x,snp.gen))
+}
+
+cand <- cbind.data.frame(cand,foo)  
+head(cand) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+
+#### Removing the duplicates
+
+```{r DuplicatesRDAcorrectionGPsExtSand}
+length(cand$snp[duplicated(cand$snp)])  # 4 duplicate detections
+cand <- cand[!duplicated(cand$snp),] # remove duplicate detections
+nrow(cand)
+```
+
+> 1 duplicate, 173 remaining candidate SNPs.
+
+```{r SaveCandidateSNPsExtSand}
+saveRDS(cand,file=paste0("outputs/CandidateSNPs/rda/",nrow(cand),"CandSNPsRDA_ExtSand.rds"))
+```
+
+#### Main predictor for each SNP
+
+```{r WhichPredictorsMostCorrCandidatesRDAcorrectionGPsExtSand}
+for (i in 1:length(cand$snp)) {
+  bar <- cand[i,]
+  cand[i,(3+length(select.var.ExtSand)+1)] <- names(which.max(abs(bar[4:(3+length(select.var.ExtSand))]))) # gives the variable
+  cand[i,(3+length(select.var.ExtSand)+2)] <- max(abs(bar[4:(3+length(select.var.ExtSand))]))              # gives the correlation
+}
+
+colnames(cand)[(3+length(select.var.ExtSand)+1)] <- "predictor"
+colnames(cand)[(3+length(select.var.ExtSand)+2)] <- "correlation"
+
+table(cand$predictor) 
+```
+
+#### Plot the SNPs
+
+```{r PrepPlotSNPsRDAcorrectionGPsExtSand}
+sel <- cand$snp
+predictor <- cand$predictor
+predictor[predictor=="depth_roots"] <- '#1f78b4'
+predictor[predictor=="bio13"] <- '#a6cee3'
+predictor[predictor=="bio5"] <- '#6a3d9a'
+predictor[predictor=="bio14"] <- '#e31a1c'
+predictor[predictor=="bio6"] <- '#33a02c'
+predictor[predictor=="sand_top"] <- '#ffff33'
+predictor[predictor=="TRI"] <- '#fb9a99'
+
+# color by predictor:
+col.pred <- rownames(correctiongp.rda$CCA$v) # pull the SNP names
+
+for (i in 1:length(sel)) {           # color code candidate SNPs
+  foo <- match(sel[i],col.pred)
+  col.pred[foo] <- predictor[i]
+}
+
+col.pred[grep("SNP",col.pred)] <- '#f1eef6' # non-candidate SNPs
+empty <- col.pred
+empty[grep("#f1eef6",empty)] <- rgb(0,1,0, alpha=0) # transparent
+empty.outline <- ifelse(empty=="#00FF0000","#00FF0000","gray32")
+bg <- c('#1f78b4','#a6cee3','#6a3d9a','#e31a1c','#33a02c','#ffff33','#fb9a99')
+```
+
+```{r PlotSNPsRDAcorrectionGPsExtSand, fig.height=8,fig.width=8}
+# axes 1 & 2
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3)
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3)
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1)
+legend("topleft", legend=select.var.ExtSand, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+
+# axes 1 & 3
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(1,3))
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("bottomright", legend=select.var.ExtSand, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+```
+
+# Set ExtWater 
+
+## RDA corrected by population structure with the ancestry coefficients
+
+### run the RDA
+
+```{r RDAncorrectionGPsExtWater}
+correctiongp.rda <- rda(gen.imp ~ bio5 + bio6 + bio13 + bio14 + water_top + depth_roots + TRI + Condition(Q1 + Q2 + Q3 + Q4 + Q4 + Q5), data=env[,c(select.var.ExtWater,paste0(rep("Q",5),1:5))], scale=T)
+correctiongp.rda
+RsquareAdj(correctiongp.rda)
+summary(eigenvals(correctiongp.rda, model = "constrained"))
+screeplot(correctiongp.rda)
+```
+
+```{r RDAcorrectionGPsSigniFullExtWater, cache=T}
+signif.full <- anova.cca(correctiongp.rda, parallel=getOption("mc.cores")) # default is permutation=999
+signif.full
+```
+
+```{r RDAcorrectionGPsSigniAxisExtWater, cache=T}
+signif.axis <- vegan::anova.cca(correctiongp.rda,by="axis", parallel=getOption("mc.cores"))
+signif.axis
+```
+
+> All axes are significant! 
+
+```{r RDAcorrectionGPsVIFExtWater}
+vif.cca(correctiongp.rda)
+```
+
+#### plot the RDA
+
+```{r PlotRDAcorrectionGPsbasePlotsExtWater, fig.height=6,fig.width=8}
+plot(correctiongp.rda, scaling=3)          # default is axes 1 and 2
+plot(correctiongp.rda, choices = c(1, 3), scaling=3)  # axes 1 and 3
+```
+
+```{r PlotRDAcorrectionGPsExtWater, fig.height=10,fig.width=10}
+levels(env$maxgp) <- c("Northern Africa",
+                       "Corsica",
+                       "Central Spain",
+                       "French Atlantic",
+                       "Iberian Atlantic",
+                       "South-eastern Spain")
+GPs <- env$maxgp
+bg <- c("orangered3",
+        "gold2",
+        "darkorchid3",
+        "navyblue",
+        "turquoise2",
+        "green3") # same colors as in paper 1
+
+# axes 1 & 2
+plot(correctiongp.rda, type="n", scaling=3)
+points(correctiongp.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3)           # the SNPs
+points(correctiongp.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[GPs]) # the genotypes
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1)                           # the predictors
+legend("bottomright", legend=levels(GPs), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+
+# axes 1 & 3
+plot(correctiongp.rda, type="n", scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[GPs], choices=c(1,3))
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("topright", legend=levels(GPs), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+```
+
+#### Identify the candidate SNPs
+
+```{r LoadingsSnpsRDAcorrectionGPsExtWater,fig.width=16,fig.height=4}
+par(mfrow=c(1,3))
+load.correctiongp.rda <- scores(correctiongp.rda, choices=c(1:7), display="species")  # Species scores for the seven constrained axes (all significant)
+hist(load.correctiongp.rda[,1], main="Loadings on RDA1",xlab="",ylab="Frequency")
+hist(load.correctiongp.rda[,2], main="Loadings on RDA2",xlab="",ylab="")
+hist(load.correctiongp.rda[,3], main="Loadings on RDA3",xlab="",ylab="") 
+hist(load.correctiongp.rda[,1], main="Loadings on RDA4",xlab="",ylab="Frequency")
+hist(load.correctiongp.rda[,2], main="Loadings on RDA5",xlab="",ylab="")
+hist(load.correctiongp.rda[,3], main="Loadings on RDA6",xlab="",ylab="") 
+hist(load.correctiongp.rda[,3], main="Loadings on RDA7",xlab="",ylab="Frequency") 
+```
+
+```{r ApplyFunctionSigniConstrainedAxisExtWater}
+cand1 <- outliers(load.correctiongp.rda[,1],3) # 52 candidate SNPs on axis 1
+cand2 <- outliers(load.correctiongp.rda[,2],3) # 19 candidate SNPs on axis 2
+cand3 <- outliers(load.correctiongp.rda[,3],3) # 27 candidate SNPs on axis 3
+cand4 <- outliers(load.correctiongp.rda[,4],3) # 27 candidate SNPs on axis 4
+cand5 <- outliers(load.correctiongp.rda[,5],3) # 19 candidate SNPs on axis 5
+cand6 <- outliers(load.correctiongp.rda[,6],3) # 18 candidate SNPs on axis 6
+cand7 <- outliers(load.correctiongp.rda[,7],3) # 26 candidate SNPs on axis 7
+
+ncand <- length(cand1) + length(cand2) + length(cand3) + length(cand4) + length(cand5) + length(cand6) + length(cand7)
+ncand
+```
+
+> <span style="color: red;">187 candidates SNPs in total.</span>
+
+```{r DFRDAcorrectionGPsExtWater}
+cand1 <- cbind.data.frame(rep(1,times=length(cand1)), names(cand1), unname(cand1))
+cand2 <- cbind.data.frame(rep(2,times=length(cand2)), names(cand2), unname(cand2))
+cand3 <- cbind.data.frame(rep(3,times=length(cand3)), names(cand3), unname(cand3))
+cand4 <- cbind.data.frame(rep(4,times=length(cand4)), names(cand4), unname(cand4))
+cand5 <- cbind.data.frame(rep(5,times=length(cand5)), names(cand5), unname(cand5))
+cand6 <- cbind.data.frame(rep(6,times=length(cand6)), names(cand6), unname(cand6))
+cand7 <- cbind.data.frame(rep(7,times=length(cand7)), names(cand7), unname(cand7))
+
+colnames(cand1) <- colnames(cand2) <- colnames(cand3) <- colnames(cand4) <- colnames(cand5) <- colnames(cand6) <- colnames(cand7) <- c("axis","snp","loading")
+
+cand <- rbind(cand1, cand2, cand3,cand4,cand5,cand6,cand7)
+cand$snp <- as.character(cand$snp)
+```
+
+```{r CorrelationPredictorsRDAcorrectionGPsExtWater}
+foo <- matrix(nrow=(ncand), ncol=length(select.var.ExtWater))
+colnames(foo) <- select.var.ExtWater
+
+for (i in 1:length(cand$snp)) {
+  nam <- cand[i,2]
+  snp.gen <- gen.imp[,nam]
+  foo[i,] <- apply(env[,select.var.ExtWater],2,function(x) cor(x,snp.gen))
+}
+
+cand <- cbind.data.frame(cand,foo)  
+head(cand) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+
+#### Removing the duplicates
+
+```{r DuplicatesRDAcorrectionGPsExtWater}
+length(cand$snp[duplicated(cand$snp)])  # 4 duplicate detections
+cand <- cand[!duplicated(cand$snp),] # remove duplicate detections
+nrow(cand)
+```
+
+> 4 duplicate, 183 remaining candidate SNPs.
+
+```{r SaveCandidateSNPsExtWater}
+saveRDS(cand,file=paste0("outputs/CandidateSNPs/rda/",nrow(cand),"CandSNPsRDA_ExtWater.rds"))
+```
+
+#### Main predictor for each SNP
+
+```{r WhichPredictorsMostCorrCandidatesRDAcorrectionGPsExtWater}
+for (i in 1:length(cand$snp)) {
+  bar <- cand[i,]
+  cand[i,(3+length(select.var.ExtWater)+1)] <- names(which.max(abs(bar[4:(3+length(select.var.ExtWater))]))) # gives the variable
+  cand[i,(3+length(select.var.ExtWater)+2)] <- max(abs(bar[4:(3+length(select.var.ExtWater))]))              # gives the correlation
+}
+
+colnames(cand)[(3+length(select.var.ExtWater)+1)] <- "predictor"
+colnames(cand)[(3+length(select.var.ExtWater)+2)] <- "correlation"
+
+table(cand$predictor) 
+```
+
+#### Plot the SNPs
+
+```{r PrepPlotSNPsRDAcorrectionGPsExtWater}
+sel <- cand$snp
+predictor <- cand$predictor
+predictor[predictor=="depth_roots"] <- '#1f78b4'
+predictor[predictor=="bio13"] <- '#a6cee3'
+predictor[predictor=="bio5"] <- '#6a3d9a'
+predictor[predictor=="bio14"] <- '#e31a1c'
+predictor[predictor=="bio6"] <- '#33a02c'
+predictor[predictor=="water_top"] <- '#ffff33'
+predictor[predictor=="TRI"] <- '#fb9a99'
+
+# color by predictor:
+col.pred <- rownames(correctiongp.rda$CCA$v) # pull the SNP names
+
+for (i in 1:length(sel)) {           # color code candidate SNPs
+  foo <- match(sel[i],col.pred)
+  col.pred[foo] <- predictor[i]
+}
+
+col.pred[grep("SNP",col.pred)] <- '#f1eef6' # non-candidate SNPs
+empty <- col.pred
+empty[grep("#f1eef6",empty)] <- rgb(0,1,0, alpha=0) # transparent
+empty.outline <- ifelse(empty=="#00FF0000","#00FF0000","gray32")
+bg <- c('#1f78b4','#a6cee3','#6a3d9a','#e31a1c','#33a02c','#ffff33','#fb9a99')
+```
+
+```{r PlotSNPsRDAcorrectionGPsExtWater, fig.height=8,fig.width=8}
+# axes 1 & 2
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3)
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3)
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1)
+legend("topleft", legend=select.var.ExtWater, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+
+# axes 1 & 3
+plot(correctiongp.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3, choices=c(1,3))
+points(correctiongp.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(1,3))
+text(correctiongp.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("bottomright", legend=select.var.ExtWater, bty="n", col="gray32", pch=21, cex=1, pt.bg=bg,ncol=2)
+```
+
 
