@@ -19,6 +19,8 @@ PinpinDistri <- rgeos::gDifference(PinpinDistri,b)
 shapefile(PinpinDistri, filename='data/maps/MaskPinpinDistri/PinpinDistriEuforgen.shp', overwrite=TRUE)
 
 
+
+
 # We are going to expand the mask with the NFI plots
 #####################################################"
 
@@ -49,6 +51,23 @@ mask <- rgeos::gUnion(PinpinDistri,NFIplots)
 plot(mask,col="green")
 plot(borders,add=T)
 
+# Removing the part where there is no SRTM data
+###############################################"
+# visualize:
+# srtm <- raster("data/Topography/SrtmWGS84/MosaicTif/srtm_mosaic.tif")
+# plot(srtm)
+# plot(mask,add=T)
+
+# cut
+b <- as(extent(5, 10, 45,48), 'SpatialPolygons')
+crs(b) <- crs(mask)
+mask <- rgeos::gDifference(mask,b)
+# plot(srtm)
+# plot(mask,add=T)
+
 
 # saving the mask:
 shapefile(mask, filename='data/maps/MaskPinpinDistri/PinpinDistriEUforgen_NFIplotsBuffer10km.shp', overwrite=TRUE)
+
+
+
