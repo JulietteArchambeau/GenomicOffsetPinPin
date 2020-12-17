@@ -1,0 +1,216 @@
+---
+title: "Fire maps"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)
+library(tidyverse)
+library(kableExtra)
+library(raster)
+library(caliver)
+```
+
+Here a script to download the Fire Weather Index from the following article: https://www.nature.com/articles/sdata201932
+
+The downloading can be done through the package `caliver`:
+  
+   - paper of the `caliver` package: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0189419
+    
+   - tutorial: https://rdrr.io/github/ecmwf/caliver/f/vignettes/caliver_intro-vignette.Rmd
+   
+   - Data from here: http://globalfiredata.org/pages/data/#burned-area
+   
+   - Global Fire Emissions Database, Version 4.1 (GFEDv4): https://daac.ornl.gov/cgi-bin/dsviewer.pl?ds_id=1293
+   
+   - Wildfire Frequency-Area Statistics in Spain: https://www.sciencedirect.com/science/article/pii/S1878029611001599
+   
+   - Europe: wildfire hazard map: https://www.preventionweb.net/english/professional/maps/v.php?id=3828
+   
+   - Forests fires map: https://civio.es/en/spain-in-flames/forest-fires-map/
+
+# GFED4 data extraction (a nightmare)
+   
+Not reproductible at all, work only the first time.... ^^ I had to increase the `Sys.sleep(x)` if I want the function to run again, if I don't, I had the following warning: `Server currently unavailable, please try again later`. This has probably something to do with the repeated number of  connections, the server refuses the access if I try to connect a lot if time in a short amount of time.
+
+So here are the files I have:
+
+First try that worked (extraction from January 1997 to December 2014):
+
+```{bash, eval=F}
+cd /home/juliette/Documents/GenomicOffset/GenomicOffsetPinPin/data/FireData/GFED4/Raw
+R
+source("../../../../scripts/Functions/ExtractBurnedAreasGFED4.R")
+BurnedAreas <- get_gfed4(start_date = "1997-01-01",
+                         end_date = "2014-12-01",
+                         temporal_resolution = "monthly",
+                         varname = "BurnedArea")
+library("raster")
+writeRaster(BurnedAreas,"GFED4_199701_201512.grd", format="raster",overwrite=TRUE)                     
+```
+
+Second try that worked, with the whole period of interest, from July 1995 to December 2014.
+
+```{bash, eval=F}
+cd /home/juliette/Documents/GenomicOffset/GenomicOffsetPinPin/data/FireData/GFED4/Raw
+R
+source("../../../../scripts/Functions/ExtractBurnedAreaMonthlyGFED4.R")
+rast <- CreateRasterBurnedAreas(start_date = "1995-07-01",end_date = "2014-12-01")
+library("raster")
+writeRaster(rast,"GFED4_199507_201412.grd", format="raster",overwrite=TRUE)
+
+# saving like in the caliver tutorial:
+# https://rdrr.io/github/ecmwf/caliver/f/vignettes/caliver_intro-vignette.Rmd
+writeRaster(rast,"GFED4_199507_201412_caliveroptions.grd", format="raster",bandorder='BIL', overwrite=TRUE, progress = 'text') 
+```
+
+# Data formating
+   
+```{r selectArea, eval=F}
+Spain <- raster::getData(name = "GADM", country = "Spain", path="data/FireData/GFED4/Raw/",level = 0)
+France <- raster::getData(name = "GADM", country = "France", path="data/FireData/GFED4/Raw/", level = 0)
+Italy <- raster::getData(name = "GADM", country = "Italy", path="data/FireData/GFED4/Raw/", level = 0)
+Morocco <- raster::getData(name = "GADM", country = "Morocco", path="data/FireData/GFED4/Raw/", level = 0)
+Algeria <- raster::getData(name = "GADM", country = "Algeria", path="data/FireData/GFED4/Raw/", level = 0)
+Portugal <- raster::getData(name = "GADM", country = "Portugal", path="data/FireData/GFED4/Raw/", level = 0)
+
+countries <- rgeos::gUnion(Morocco,Italy) %>% 
+  rgeos::gUnion(France) %>% 
+  rgeos::gUnion(Spain)  %>% 
+  rgeos::gUnion(Algeria) %>% 
+  rgeos::gUnion(Portugal)
+
+rast.clim <- raster("data/climate/CurrentClimate/EuMedClim_Tiff_1901_2009/map_bio1_1901-2009_with_34_sampling_points.tif")
+b <- as(extent(rast.clim), 'SpatialPolygons')
+countries <- rgeos::gIntersection(countries,b)
+plot(countries)
+
+shapefile(countries, "data/FireData/GFED4/Raw/countries.shp")
+```
+
+# Raster for the genomic analyses 
+
+```{r RasterForGenomicAnalyses, eval=F}
+countries <- shapefile("data/FireData/GFED4/Raw/countries.shp")
+BurnedAreas <- raster::brick("data/FireData/GFED4/Raw/GFED4_199507_201412.grd")
+
+# Applying the scale factor = 0.01
+BurnedAreas <- BurnedAreas * 0.01
+
+# Set extent
+raster::extent(BurnedAreas) <- raster::extent(-180, 180, -90, 90)
+
+# Assign CRS (WGS84)
+raster::crs(BurnedAreas) <-  "+proj=longlat +datum=WGS84 +no_defs"
+
+# Mask and crop burned areas over Europe
+BurnedAreas <- mask_crop_subset(r = BurnedAreas, p = countries)
+
+# Mean over the period of interest
+BurnedAreas <- calc(BurnedAreas, mean)
+
+plot(BurnedAreas)
+
+writeRaster(BurnedAreas,"data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
+```
+
+
+```{r VisualizeRasterGenomic,fig.height=8,fig.width=8}
+plot(raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd"))
+```
+
+
+## Raster for the NFI models
+
+```{r RasterForNFIModels, eval=F}
+Spain <- raster::getData(name = "GADM", country = "Spain", path="data/FireData/GFED4/Raw/",level = 0)
+France <- raster::getData(name = "GADM", country = "France", path="data/FireData/GFED4/Raw/", level = 0)
+BurnedAreas <- raster::brick("data/FireData/GFED4/Raw/GFED4_199507_201412.grd")
+
+# Applying the scale factor = 0.01
+BurnedAreas <- BurnedAreas * 0.01
+
+# Set extent
+raster::extent(BurnedAreas) <- raster::extent(-180, 180, -90, 90)
+
+# Assign CRS (WGS84)
+raster::crs(BurnedAreas) <-  "+proj=longlat +datum=WGS84 +no_defs"
+
+
+# If observations layers have no date, assign it!
+dataDates <- seq.Date(from = as.Date("1995-07-01"),
+                      to = as.Date("2014-12-01"), 
+                      by = "month")
+names(BurnedAreas) <- dataDates
+
+# Mask and crop burned areas over Spain
+BaSp <- mask_crop_subset(r = BurnedAreas, p = Spain)
+BaFr <- mask_crop_subset(r = BurnedAreas, p = France)
+
+BaSp <- BaSp[[1:162]] # from July 1995 to December 2008 (range of the third Spanih Inventory)
+BaSp <- calc(BaSp, mean)
+
+BaFr <- BaFr[[115:length(names(BaFr))]] # from July 1995 to December 2008 (range of the third Spanih Inventory)
+BaFr <- calc(BaFr, mean)
+
+rast <- merge(BaFr,BaSp)
+
+# attribute the extent of the other env. variables (cliamtic, topography, soil)
+rast<- crop(rast,extent(-10,14,31,50))
+
+writeRaster(rast,"data/FireData/GFED4/PreparedRasters/GFED4_199507_200712_Spain_200501_201412_France.grd",overwrite=T)
+```
+
+```{r VisualizeRasterNFI,fig.height=8,fig.width=8}
+plot(raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_200712_Spain_200501_201412_France.grd"))
+```
+
+
+`r knitr::opts_chunk$set(eval = F)`
+   
+
