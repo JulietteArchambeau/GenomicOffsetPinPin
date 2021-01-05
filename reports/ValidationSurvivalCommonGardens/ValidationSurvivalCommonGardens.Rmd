@@ -1,0 +1,420 @@
+---
+title: "Survival differences in dry common gardens"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    df_print: kable
+    highlight: textmate
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+editor_options: 
+  chunk_output_type: console
+---
+
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=F)
+options(width = 300)
+library(knitr)
+library(kableExtra)
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(reshape2)
+library(ggplot2)
+#library(adespatial)
+#library(vegan)
+library(latex2exp)
+library(cowplot)
+#library(rethinking)
+library(rstan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+#library(bayesplot)
+#color_scheme_set("green")
+#library(loo)
+```
+
+
+# Survival differences among provenances
+
+In this section, we want to determine whether there is an **association between the climate-of-origin of the provenances and the proportion of survivors in the provenances**, independantly in Madrid, Caceres and Portugal. We build the two following models.
+
+  - Model 1 `M1`: This model assumes that survival is **directly** associated with the climate-of-origin of the provenances (in this document, the mean precipitation of the driest month in the provenance location).
+
+\begin{align*} 
+a_{p} &\sim \text{Binomial} (N_{p},p_{p}) \\
+\text{logit}(p_{p}) &= \beta_{0} + \beta_{1}X_{p}\\
+\end{align*}
+
+with $a_{p}$ the count of individual that survived in the provenance $p$, $N_{g}$ the total number of individuals in the provenance $p$ (=number of individuals that were initially planted in the common garden) and $X_{p}$ is mean climate in the provenance $p$.
+
+  - Model 2 `M2`: This model assumes that **tree height acts as a confounder**. Tree that were higher at the time of planting have a higher probability of survival. This is particularly true in Madrid and Caceres where there were an extreme drought event the same year the trees were planted. 
+  
+\begin{align*} 
+a_{p} &\sim \text{Binomial} (N_{p},p_{p}) \\
+\text{logit}(p_{p}) &= \beta_{0} + \beta_{1}X_{p} + \beta_{2}H_{p} \\
+\end{align*}
+
+with $a_{p}$ the count of individual that survived in the population $p$, $N_{g}$ the total number of individuals of the provenance $p$, $X_{p}$ is mean climate in the provenance $p$ and $H_{p}$ is the BLUPs for height of the provenance $p$ (calculated across all common gardens in the model 1 of paper 1). We use the BLUPs calculated across all common garden because we showed in paper 1 that the provenance by site interaction was very small and so we neglect it.
+
+## The data
+
+### Height data
+
+We use here the provenance intercepts obtained in the model 1 of the first paper. 
+
+```{r ExtractBlockIntercepts,message=F,warning=F}
+HierMod <- readRDS(file="../../Pinpin_Clonapin/HeightPinpinClonapin/outputs/models/P1/MOD1.rds")
+heights <- HierMod %>% broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>% # we take the mean of the prov random intercepts
+  filter(str_detect(term, "^(r_prov\\[)")) %>% 
+  dplyr::rename(height=estimate,prov=term) %>% 
+  mutate(prov=str_sub(prov,8,-12))
+heights %>% knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+### Environmental and survival data
+
+```{r LoadEnvSurvData}
+data <- readRDS(file="data/AllDataPhenoClimSoil.RDS")
+
+# Removing genotypes for which there is no genomic data
+data <- data[!(is.na(data$Q1)),]
+```
+
+## Run the survival models
+
+Function to run the models:
+
+```{r FunctionRunSurvModels, message=F,warning=F}
+RunSurvModels <- function(site){
+subdata <- data[data$site==site,] %>% 
+  dplyr::select(prov,contains("_prov")) %>% 
+  dplyr::select(-contains("sub"),-contains("tude")) %>% 
+  unique()
+names(subdata) <- c("prov",str_sub(names(subdata[,2:ncol(subdata)]),1,-6))
+
+subdata <- data[data$site==site,] %>% 
+  dplyr::select(prov,survival) %>% 
+  group_by(prov) %>% 
+  dplyr::summarise(survival=sum(survival),tot.count=n()) %>% 
+  left_join(heights[,1:2],by="prov") %>% 
+  left_join(subdata,by="prov")
+
+output <- tibble(env=colnames(subdata[,5:ncol(subdata)]),
+                 beta1.M1=NA,
+                 LowCI1.M1=NA,
+                 HighCI1.M1=NA,
+                 CrossZero1.M1=NA,
+                 
+                 beta1.M2=NA,
+                 LowCI1.M2=NA,
+                 HighCI1.M2=NA,
+                 CrossZero1.M2=NA,
+                 
+                 beta2.M2=NA,
+                 LowCI2.M2=NA,
+                 HighCI2.M2=NA,
+                 CrossZero2.M2=NA)
+
+stancode1 = stan_model("scripts/StanModels/BinomialValidationCommonGardens/BinSurvivalOneCovariateNoHeight.stan")
+stancode2 = stan_model("scripts/StanModels/BinomialValidationCommonGardens/BinSurvivalOneCovariateAndHeight.stan")
+
+for(i in colnames(subdata[,5:ncol(subdata)])){
+  datalist <- list(N=length(subdata$prov),
+                    NbTot=subdata %>% pull(tot.count),
+                    NbSurv=subdata %>%pull(survival),
+                    heightSC=scale(subdata %>% pull(height))[,1],
+                    covariateSC= scale(subdata %>% pull(all_of(i)))[,1])
+  
+  # Model 1
+  
+  mstan <- sampling(stancode1, data = datalist, iter = 2000, chains = 4, cores = 4,init=0)
+  
+  df <- broom::tidyMCMC(mstan,droppars = NULL, estimate.method = "median", conf.int = T,conf.level = 0.95) 
+  
+  # Covariate
+  output[output$env==i,"beta1.M1"] <- df[df$term=="betaCovariate","estimate"]$estimate
+  output[output$env==i,"LowCI1.M1"] <- df[df$term=="betaCovariate","conf.low"]$conf.low
+  output[output$env==i,"HighCI1.M1"] <- df[df$term=="betaCovariate","conf.high"]$conf.high
+  output[output$env==i,"CrossZero1.M1"] <- ifelse((output$LowCI1.M1[output$env==i]>0 & output$HighCI1.M1[output$env==i]<0) | (output$LowCI1.M1[output$env==i]<0 & output$HighCI1.M1[output$env==i]>0), "-" ,"*")
+  
+  
+  # Model 2
+  
+  mstan <- sampling(stancode2, data = datalist, iter = 2000, chains = 4, cores = 4,init=0)
+  
+  df <- broom::tidyMCMC(mstan,droppars = NULL, estimate.method = "median", conf.int = T,conf.level = 0.95) 
+  
+  # Covariate
+  output[output$env==i,"beta1.M2"] <- df[df$term=="betaCovariate","estimate"]$estimate
+  output[output$env==i,"LowCI1.M2"] <- df[df$term=="betaCovariate","conf.low"]$conf.low
+  output[output$env==i,"HighCI1.M2"] <- df[df$term=="betaCovariate","conf.high"]$conf.high
+  output[output$env==i,"CrossZero1.M2"] <- ifelse((output$LowCI1.M2[output$env==i]>0 & output$HighCI1.M2[output$env==i]<0) | (output$LowCI1.M2[output$env==i]<0 & output$HighCI1.M2[output$env==i]>0), "-" ,"*")
+  
+  # Height
+  output[output$env==i,"beta2.M2"] <- df[df$term=="betaHeight","estimate"]$estimate
+  output[output$env==i,"LowCI2.M2"] <- df[df$term=="betaHeight","conf.low"]$conf.low
+  output[output$env==i,"HighCI2.M2"] <- df[df$term=="betaHeight","conf.high"]$conf.high
+  output[output$env==i,"CrossZero2.M2"] <- ifelse((output$LowCI2.M2[output$env==i]>0 & output$HighCI2.M2[output$env==i]<0) | (output$LowCI2.M2[output$env==i]<0 & output$HighCI2.M2[output$env==i]>0), "-" ,"*")
+  }
+
+saveRDS(output, file=paste0("outputs/ValidationSurvivalCommonGardens/stanoutputs_SurvivalVsCovariates_",site,".rds"))
+
+return(output)
+}
+```
+
+In the output table:
+
+  - `beta1.M1` corresponds to $\beta_{1}$ in model 1.
+  - `LowCI1.M1` corresponds to the lower limit of the credible interval of $\beta_{1}$ in model 1.
+  - `HighCI1.M1` corresponds to the higher limit of the credible interval of $\beta_{1}$ in model 1.
+  - `CrossZero1.M1` is equal to "*" if the credi interval of $\beta_{1}$ in model 1 crosses 0, and "-" otherwise.
+  - `beta1.M2` corresponds to $\beta_{1}$ in model 2 (with height as a counfounder).
+  - `LowCI1.M2` corresponds to the lower limit of the credible interval of $\beta_{1}$ in model 2.
+  - `HighCI1.M2` corresponds to the higher limit of the credible interval of $\beta_{1}$ in model 2.
+  - `CrossZero1.M2` is equal to "*" if the credi interval of $\beta_{1}$ in model 2 crosses 0, and "-" otherwise.
+  - `beta2.M2` corresponds to $\beta_{2}$ in model 2 (with height as a counfounder).
+  - `LowCI2.M2` corresponds to the lower limit of the credible interval of $\beta_{2}$ in model 2.
+  - `HighCI2.M2` corresponds to the higher limit of the credible interval of $\beta_{2}$ in model 2.
+  - `CrossZero2.M2` is equal to "*" if the credi interval of $\beta_{2}$ in model 2 crosses 0, and "-" otherwise.
+
+  
+### In Caceres
+
+```{r}
+site="caceres"
+```
+
+
+```{r SurvModelsCaceres, message=F,warning=F,eval=F}
+output <- RunSurvModels(site="caceres")
+```
+
+```{r VisualizeSurvModelsCaceres, message=F,warning=F}
+output <- readRDS(file=paste0("outputs/ValidationSurvivalCommonGardens/stanoutputs_SurvivalVsCovariates_",site,".rds"))
+
+output %>% mutate_if(is.numeric, round, digits=4) %>% 
+  mutate(CrossZero1.M1 = cell_spec(CrossZero1.M1, "html", color = ifelse(CrossZero1.M1 == "*", "red", "gray")),
+         CrossZero1.M2 = cell_spec(CrossZero1.M2, "html", color = ifelse(CrossZero1.M2 == "*", "red", "gray")),
+         CrossZero2.M2 = cell_spec(CrossZero2.M2, "html", color = ifelse(CrossZero2.M2 == "*", "red", "gray"))) %>%
+  knitr::kable(format = "html", escape = F) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+**Interpretation:** <span style="color: red;">we clearly see here the counfounding effect of tree height on survival. Some environmental variables that were significant in `M1` are not significant anymore in `M2`. On the contrary, some environmental variables that were not significantly associated with survival in `M1`, are significantly associated with survival in `M2`. Interestingly, significant environmental variables in `M2` are precipitation related variables: the annual precipitation (`bio12`), the precipitation of the driest month (`bio14`), precipitation in june-july-august (`prec.jja`), precipitation in september-october-november (`prec.son`), and max and min of the precipitation-evapotranspiration potential (`ppet.min` and `ppet.max`). Among these variables, `bio14` was the one with the highest $\beta_{1}$.</span>
+
+### In Madrid
+
+```{r}
+site="madrid"
+```
+
+
+```{r SurvModelsMadrid, message=F,warning=F,eval=F}
+output <- RunSurvModels(site=site)
+```
+
+```{r VisualizeSurvModelsMadrid, message=F,warning=F}
+output <- readRDS(file=paste0("outputs/ValidationSurvivalCommonGardens/stanoutputs_SurvivalVsCovariates_",site,".rds"))
+
+output %>% mutate_if(is.numeric, round, digits=4) %>% 
+  mutate(CrossZero1.M1 = cell_spec(CrossZero1.M1, "html", color = ifelse(CrossZero1.M1 == "*", "red", "gray")),
+         CrossZero1.M2 = cell_spec(CrossZero1.M2, "html", color = ifelse(CrossZero1.M2 == "*", "red", "gray")),
+         CrossZero2.M2 = cell_spec(CrossZero2.M2, "html", color = ifelse(CrossZero2.M2 == "*", "red", "gray"))) %>%
+  knitr::kable(format = "html", escape = F) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+**Interpretation:** <span style="color: red;"> We still see clearly the effect of the confounding effect of survival here. `bio2` shows a negative association with survival in `M1` but a positive association in `M2`, which makes more sense as Madrid is located in a continental region. Most of the variables (both precipitation and temperature related variables) are significant in `M2`, whereas soil variables are not significant. Temperature-related variables are the ones showing the highest $\beta_{1}$.</span>
+
+# Association btw candidate SNPs and survival
+
+This section can be divided in two parts: the SNP by SNP analyses and the analyses combining all SNPs
+
+First, we arrange the candidate SNPs so that the beneficial alleles in the dry common gardens (which are expected to be positively associated with survival in Madrid or Caceres) have the value "1" (the homozygotes with two beneficial alleles are noted with "2").
+
+**SNP by SNP analyses:** for each SNP, we aim to determine whether there is an association between the **SNP allele frequency across provenances** and the **proportion of survivors in the provenances**, independantly in Madrid, Caceres and Portugal. We build the following model:
+
+\begin{align*} 
+a_{p} &\sim \text{Binomial} (N_{p},p_{p}) \\
+\text{logit}(p_{p}) &= \beta_{0} + \beta_{1}Prop_{p} + \beta_{2}H_{p} \\
+\end{align*}
+
+with $a_{p}$ the count of individual that survived in the provenance $p$, $N_{g}$ the total number of individuals in the provenance $p$ (=number of individuals that were initially planted in the common garden for the provenance $p$), $Prop_{p}$ is the proportion of the allele considered in the population $p$, $H_{p}$ is the BLUPs for height of the provenance $p$ (calculated across all common gardens in the model 1 of paper 1).
+
+This model assumes that **tree height acts as a confounder**. Trees that were higher at the planting time have a higher probability of survival as it could have helped them to resist to the extreme drought event that happenned the same year. 
+
+We expect that there will be a positive association between the proportion of beneficial alleles and the proportions of survivors.
+
+In the output table:
+  - `covar` covariate
+  - `SNPset` set of candidate SNPs btw merged candidates, intermediate candidates and common candidates.
+  - `NbDup1` the number of pairs of SNPs (among the candidate SNPs) that show a perfect correlation (|correlation coeff| = 1)
+  - `NbDup099` the number of pairs of SNPs (among the candidate SNPs) that show a nearly perfect correlation (|correlation coeff| = 0.99)
+  - `NbCandidates` in the SNP-by-SNP analysis, the total number of candidate SNPs.
+  - `NbSigniCand` in the SNP-by-SNP analysis, the number of candidate SNPs with  $\beta_{1}$ > 0 and that did not cross zero.
+  - `Beta1SNPcount` in the analysis based on counts of SNPs, the value of $\beta_{1}$ in model 1.
+  - `CrossZero1SNPcount` in the analysis based on counts of SNPs, equal to "*" if the credible interval of $\beta_{1}$ in model 1 crosses 0, and "-" otherwise.
+  
+
+## Caceres
+
+```{r DFCandCaceres}
+DFcandcac <- readRDS(file = "outputs/ValidationSurvivalCommonGardens/CandidateSNPs/DF_caceres.rds")
+DFcandcac %>% 
+  na.omit() %>% 
+  mutate(CrossZero1SNPcount = cell_spec(CrossZero1SNPcount, "html", color = ifelse(CrossZero1SNPcount == "*", "red", "gray"))) %>% 
+  knitr::kable(format = "html", escape = F) %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+## Madrid
+
+```{r DFCandMadrid}
+DFcandmad <- readRDS(file = "outputs/ValidationSurvivalCommonGardens/CandidateSNPs/DF_madrid.rds")
+DFcandmad %>%
+  na.omit() %>% 
+  mutate(CrossZero1SNPcount = cell_spec(CrossZero1SNPcount, "html", color = ifelse(CrossZero1SNPcount == "*", "red", "gray"))) %>% 
+  knitr::kable(format = "html", escape = F) %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+# Association btw random SNPs and survival
+
+Here is the 10 first rows of the dataframe summing up the 1000 random samples of SNPs with frequency matching that of the candidate SNPs  (one row per random sample). The columns correspond to:
+
+  - `sample.id` the id of the random sample
+  - `NbDup1` the number of pairs of SNPs (among the randomly selected SNPs) that show a perfect correlation (|correlation coeff| = 1)
+  - `NbDup099` the number of pairs of SNPs (among the randomly selected SNPs) that show a nearly perfect correlation (|correlation coeff| = 0.99)
+  - `NbRand` in the SNP-by-SNP analysis, the total number of random SNPs (corresponding to the total number of candidate SNPs for the sets of SNPs of interest)
+  - `NbSigniRand` in the SNP-by-SNP analysis, the number of SNPs with  $\beta_{1}$ > 0 and that did not cross zero.
+  - `Beta1SNPcount` in the analysis based on counts of SNPs, the value of $\beta_{1}$ in model 1.
+  - `LowCI1SNPcount` in the analysis based on counts of SNPs, the lower limit of the credible interval of $\beta_{1}$ in model 1.
+  - `HighCI1SNPcount` in the analysis based on counts of SNPs, the higher limit of the credible interval of $\beta_{1}$ in model 1.
+  - `CrossZero1SNPcount` in the analysis based on counts of SNPs, equal to "*" if the credible interval of $\beta_{1}$ in model 1 crosses 0, and "-" otherwise.
+  
+
+```{r Parameters}
+covar="bio12"
+SNPset="MergedCand"
+CovSet <- "AvgWater"
+```
+
+
+## Caceres
+
+```{r DFRandCaceres}
+DF <- readRDS(file = paste0("outputs/ValidationSurvivalCommonGardens/RandomSNPs/DF_",covar,"_",CovSet,"_",SNPset,"_caceres.rds"))
+
+DF[1:10,1:ncol(DF)] %>%
+  mutate(CrossZero1SNPcount = cell_spec(CrossZero1SNPcount, "html", color = ifelse(CrossZero1SNPcount == "*", "red", "gray"))) %>% 
+  knitr::kable(format = "html", escape = F) %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+### Duplicates
+
+```{r DuplicatesRandomCaceres}
+# In the candidate SNPs:
+DFcandcac[DFcandcac$covar==covar&DFcandcac$SNPset==SNPset,]
+
+# In the random SNPs:
+as.data.frame(table(DF$NbDup1)) %>% 
+  dplyr::rename("Number of duplicates (rho=1)"=Var1,"Number of random samples"=Freq) %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+as.data.frame(table(DF$NbDup099)) %>% 
+  dplyr::rename("Number of nearly duplicates (rho>0.99)"=Var1,"Number of random samples"=Freq) %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+**Most of the random samples do not contain duplicated SNPs.** 
+
+
+### SNP-by-SNP analysis
+
+```{r BarplotCaceres}
+countSigni <- as.data.frame(table(DF$NbSigniRand)) %>% 
+  dplyr::rename(NbSigniRand=Var1,CountRandSamp=Freq) %>% 
+  mutate(NbSigniRand=as.numeric(as.character(NbSigniRand)))
+
+ggplot(countSigni, aes(x=NbSigniRand,y=CountRandSamp)) +  
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  ggtitle(TeX("Bar plot of the number of random SNPs that have a significant association with survival")) +
+  xlab(TeX("Number of significant random SNPs")) +
+  ylab("Count of random samples of SNPs") +
+  geom_vline(aes(xintercept = DFcandcac[DFcandcac$covar==covar&DFcandcac$SNPset==SNPset,"NbSigniCand"],linetype = "grou"),color = "red", size=1) +
+  scale_linetype(name = "",labels=lapply(sprintf("Number of significant candidate SNPs"), TeX)) +
+  theme(legend.position = c(0.8,0.9),
+        legend.text = element_text(color="red",size = 11),
+        plot.title = element_text(size=12))
+```
+
+Among the 1000 random samples of SNPs, there were between 0 and 11 SNPs for which the p-value of $\beta_{1}$ was lower than 0.05 and for which $\beta_{1}$ and $\rho$ (correlation coefficient between the SNP frequency and the precipitation of the driest month) have opposite signs. As a reminder, there were 15 SNPs in this case in the drought-associated candidates SNPs. SO, this is promising, but we have to check that this is not due to the high level of duplicates in the selected SNPs. p-values < 0.05 for the drought-associated candidate SNPs. However ,I have to check that this is not due to the duplicates, I think I shoud redo it without the duplicates.
+
+
+### Analysis based on counts of SNPs
+
+```{r VisualizeDFcaceres, fig.height=6,fig.width=11,warning=F,message=F}
+q025 <- quantile(DF$Beta1SNPcount, .025)
+q975 <- quantile(DF$Beta1SNPcount, .975)
+
+ggplot(DF, aes(Beta1SNPcount)) +
+  geom_histogram(aes(x=Beta1SNPcount, y=..density..), bins=50, fill="#d3d3d3", color="black") +
+  geom_density(color="gray10") +
+  ggtitle(TeX("Histogram and density plot of $\\beta_{1}$")) +
+  xlab(TeX("$\\beta_{1}$ of randomly selected SNPs")) +
+  ylab("Density") +
+  theme_bw() + 
+  geom_vline(aes(xintercept = DFcandcac[DFcandcac$covar==covar&DFcandcac$SNPset==SNPset,"Beta1SNPcount"],
+                 linetype = "grou"),color = "red", size=1) +
+  geom_segment(aes(x=q025,xend=q975, y=0, yend=0), size=3) + 
+  scale_linetype(name = "",labels=lapply(sprintf("$\\beta_{1}$ of the drought-associated candidate SNPs"), TeX)) +
+  theme(legend.position = c(0.81,0.93),legend.text = element_text(color="red",size = 12))
+```
+
