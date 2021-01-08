@@ -11,6 +11,9 @@ output:
        collapsed: false
     number_sections: true
     highlight: textmate
+bibliography: references.bib 
+editor_options: 
+  chunk_output_type: console
 ---
 
 
@@ -63,12 +66,21 @@ library(dplyr)
 library(tidyverse)
 #library(tibble)
 library(raster)
-library(sgdm)
+library(kableExtra)
 ```
+
+```{r LoadNeededFunctions}
+source("scripts/Functions/PairwiseWCfstSmallSamp.R")
+```
+
 
 To calculate the Fst matrix, we use **Weir and Cockerham method**. 
 
-# Using the whole genomic dataset
+# reference SNPs
+
+Using the whole genomic dataset
+
+## loading and preparing genomic data
 
 ```{r  LoadFilesAndFormat}
 # File with the genotype names (clone names)
@@ -95,14 +107,6 @@ dim(geno)
 unique(unlist(geno))
 ```
 
-<!-- I followed the example in the package 'hierfstats' to format the dataset. Here is the exemple of the package hierfstats: -->
-
-```{r HierfstatsExample, eval=F,echo=F}
-data(gtrunchier)
-head(gtrunchier)
-pairwise.WCfst(gtrunchier[,-2],diploid=TRUE)
-```
-
 ```{r  PrepareData}
 geno[geno ==1] <- 12
 geno[geno ==2] <- 22
@@ -115,7 +119,7 @@ geno[1:10,1:10]
 dim(geno)
 ```
 
-> Missing values
+## Missing values
 
 ```{r MissingData}
 sum(is.na(geno))
@@ -123,13 +127,17 @@ sum(is.na(geno))
 
 There are 17263 missing data in the whole genomic dataset. **To calculate the pairwise FST matrix, we keep them (no imputation).**
 
-> Negative values
+## Estimating the pairwise FSTs
+
+Here we use the function `pairwise.WCfst`. We could have used the function `gene.dist` (with the option `WC84`), as in [Gougherty et al. (2020)](https://www.biorxiv.org/content/10.1101/2020.02.28.961060v1.abstract). `gene.dist` keeps only the lower triangle of the $F_{ST}$ matrix, while `pairwise.WCfst` keeps the whole matrix.
 
 ```{r ComputeFstMatrix}
 # fst <- pairwise.WCfst(geno,diploid=TRUE)
-# saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_withNeg.rds")
-fst <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_withNeg.rds")
+# saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_refSNPs_withNeg.rds")
+fst <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_refSNPs_withNeg.rds")
 ```
+
+## FST matrix without negative values
 
 2 Fst values have very very small negative values. It generally means there is more variation within than between provenances and is well known to result from uneven sample sizes. **We set them to 0.**
 
@@ -138,18 +146,58 @@ See here some comments on negative values obtained when calculating pairwise Fst
   - https://www.biostars.org/p/77372/
   
   - https://www.researchgate.net/post/How-the-Fst-value-is-with-negative-value
+  
+In [Gougherty et al. 2020](https://www.biorxiv.org/content/10.1101/2020.02.28.961060v1.abstract) : "Any pairwise $F_{ST}$ values less than zero were assigned a value of zero."
 
 ```{r NegValuestoZeroFstMatrix}
 fst[which(fst <0)]
 fst[which(fst <0)] <- 0
 round(fst,2)
 fst
-# saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_noNeg.rds")
+# saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_refSNPs_noNeg.rds")
 ```
 
 > Visualization
 
-```{r visualizeMatrixFst, fig.height=20,fig.width=20}
+```{r visualizeMatrixFstnoNeg, fig.height=20,fig.width=20}
+source("scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+p.mat <- corpmat(fst)
+
+corrplot::corrplot(fst, method="color", col=col(200),
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=23, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.05, insig = "blank", number.cex =0.8,tl.cex = 0.8,
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE)
+```
+
+## Scaled FST matrix
+
+In @ingvarsson2020genome: "Genetic distances between populations, from the pairwise FST matrix, were scaled to lie between 0 and 1 by **subtracting the minimum value and then dividing by the maximum value** (Fitzpatrick & Keller, 2015). Scaling was performed to enable comparisons between reference and associated SNPs that displayed different ranges of observed FST values."
+
+```{r ScalingFSTmatrix}
+# load again the FST matrix
+fst <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_refSNPs_withNeg.rds")
+
+max(fst,na.rm=T) # maximun value
+min(fst,na.rm=T) # minimum value
+fst.notworking <- (fst-min(fst,na.rm=T))/max(fst,na.rm=T) # scaling the FST matrix
+range(fst.notworking,na.rm=T)
+
+fst <- (fst-min(fst,na.rm=T))/(max(fst,na.rm=T)-min(fst,na.rm=T)) # scaling the FST matrix, like proposed here:
+# https://www.statisticshowto.com/probability-and-statistics/normal-distributions/normalized-data-normalization/
+range(fst,na.rm=T)
+
+# saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_refSNPs_scaled.rds")
+```
+
+> Visualization
+
+```{r visualizeMatrixFstScaled, fig.height=20,fig.width=20}
 source("scripts/Functions/corpmat.R")
 col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
 
@@ -168,77 +216,120 @@ corrplot::corrplot(fst, method="color", col=col(200),
 
 `r knitr::opts_chunk$set(eval = F)`
 
-#  Using the candidate SNPs 
+#  Common candidate SNPs 
 
+## Set AvgWater
 
-```{r  LoadFilesAndFormatCand}
-# File with the genotype names (clone names)
-geno_names <- read.delim2("data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
-
-# File with the genotype of each clone for each SNP
-geno <- read.csv("data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
-str(geno[,1:20])
-dim(geno) # SNPs in rows, genotypes in columns
-
-# In this file, SNPs have their names, but not the genotypes.
-head(geno[,1:10])
-
-# Removing the first two columns with allele info (A,T, G or C)
-geno <- geno[,3:dim(geno)[[2]]]
-
-# Give the genotype name for each column of geno
-colnames(geno) <- rownames(geno_names)
-
-rm(geno_names)
-
+```{r  LoadCandAvgWater}
 # Load candidate SNPs
-cand <- readRDS(file="outputs/CandidateSNPs/????")
+cand <- readRDS(file="outputs/CandidateSNPs/SetsCandidateSNPs/AllCovariates/4_CommonCandidates_AvgWater.rds")
 
 # Keep only candidate SNPs
-geno <- geno[rownames(geno) %in% cand$snp,]
+genocand <- geno %>% dplyr::select(prov,cand$snp)
 
-geno[geno ==1] <- 12
-geno[geno ==2] <- 22
-geno[geno ==0] <- 11
-geno <- t(geno) # SNps in column and genotypes in row
-geno <- as.data.frame(geno)
-geno$prov <- substr(row.names(geno), 0, 3)
-geno <- geno %>% dplyr::select(prov, everything())
-geno[1:10,1:10]
-dim(geno)
+genocand[1:10,1:ncol(genocand)] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
 ```
 
-```{r ComputeFstMatrixCandidateSNPs}
-#fst <- pairwise.WCfst(geno,diploid=TRUE)
-#saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix183CandSnps_withNeg.rds")
-fst <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix183CandSnps_withNeg.rds")
-fst[1:10,1:10]
+```{r ComputeFstMatrixCandidateSNPsAvgWater}
+fst <- pairwise.WCfst.smallSamp(genocand,diploid=TRUE) # need the modified version of the function here
+
+max(fst,na.rm=T) # maximun value
+min(fst,na.rm=T) # minimum value
+
+fst <- (fst-min(fst,na.rm=T))/(max(fst,na.rm=T)-min(fst,na.rm=T)) # scaling the FST matrix, like proposed here:
+# https://www.statisticshowto.com/probability-and-statistics/normal-distributions/normalized-data-normalization/
+range(fst,na.rm=T)
+
+saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_CommonCandidates_AvgWater_scaled.rds")
 ```
 
+## Set AvgSand
 
-4 Fst values have very very small negative values. We set them to 0.
+```{r  LoadCandAvgSand}
+# Load candidate SNPs
+cand <- readRDS(file="outputs/CandidateSNPs/CommonCandidates/3_CommonCandidates_AvgSand.rds")
 
-```{r NegValuestoZeroFstMatrixCandidateSNPs}
-fst[which(fst <0)]
-fst[which(fst <0)] <- 0
-round(fst,2)
-fst
-#saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix183CandSnps_noNeg.rds")
+# Keep only candidate SNPs
+genocand <- geno %>% dplyr::select(prov,cand$snp)
+
+genocand[1:10,1:ncol(genocand)] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
 ```
 
+```{r ComputeFstMatrixCandidateSNPsAvgSand}
+fst <- pairwise.WCfst.smallSamp(genocand,diploid=TRUE) # need the modified version of the function here
 
-```{r visualizeMatrixFstCandidateSNPs, fig.height=20,fig.width=20}
-source("scripts/Functions/corpmat.R")
-col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+max(fst,na.rm=T) # maximun value
+min(fst,na.rm=T) # minimum value
 
-p.mat <- corpmat(fst)
+fst <- (fst-min(fst,na.rm=T))/(max(fst,na.rm=T)-min(fst,na.rm=T)) # scaling the FST matrix, like proposed here:
+# https://www.statisticshowto.com/probability-and-statistics/normal-distributions/normalized-data-normalization/
+range(fst,na.rm=T)
 
-corrplot::corrplot(fst, method="color", col=col(200),
-                   type="upper", order="hclust", 
-                   addCoef.col = "black", # Add coefficient of correlation
-                   tl.col="black", tl.srt=23, #Text label color and rotation
-                   # Combine with significance
-                   p.mat = p.mat, sig.level = 0.05, insig = "blank", number.cex =0.8,tl.cex = 0.8,
-                   # hide correlation coefficient on the principal diagonal
-                   diag=FALSE)
+saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_CommonCandidates_AvgSand_scaled.rds")
 ```
+
+## Set ExtWater
+
+```{r  LoadCandExtWater}
+# Load candidate SNPs
+cand <- readRDS(file="outputs/CandidateSNPs/CommonCandidates/17_CommonCandidates_ExtWater.rds")
+
+# Keep only candidate SNPs
+genocand <- geno %>% dplyr::select(prov,cand$snp)
+
+genocand[1:10,1:ncol(genocand)] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+```{r ComputeFstMatrixCandidateSNPsExtWater}
+fst <- pairwise.WCfst(genocand,diploid=TRUE)
+
+max(fst,na.rm=T) # maximun value
+min(fst,na.rm=T) # minimum value
+
+fst <- (fst-min(fst,na.rm=T))/(max(fst,na.rm=T)-min(fst,na.rm=T)) # scaling the FST matrix, like proposed here:
+# https://www.statisticshowto.com/probability-and-statistics/normal-distributions/normalized-data-normalization/
+range(fst,na.rm=T)
+
+saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_CommonCandidates_ExtWater_scaled.rds")
+```
+
+## Set ExtSand
+
+```{r  LoadCandExtSand}
+# Load candidate SNPs
+cand <- readRDS(file="outputs/CandidateSNPs/CommonCandidates/17_CommonCandidates_ExtSand.rds")
+
+# Keep only candidate SNPs
+genocand <- geno %>% dplyr::select(prov,cand$snp)
+
+genocand[1:10,1:ncol(genocand)] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+```{r ComputeFstMatrixCandidateSNPsExtSand}
+fst <- pairwise.WCfst(genocand,diploid=TRUE)
+
+max(fst,na.rm=T) # maximun value
+min(fst,na.rm=T) # minimum value
+
+fst <- (fst-min(fst,na.rm=T))/(max(fst,na.rm=T)-min(fst,na.rm=T)) # scaling the FST matrix, like proposed here:
+# https://www.statisticshowto.com/probability-and-statistics/normal-distributions/normalized-data-normalization/
+range(fst,na.rm=T)
+
+saveRDS(fst,file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_CommonCandidates_ExtSand_scaled.rds")
+```
+
+# References
+
+`r knitr::opts_chunk$set(eval = F)`
