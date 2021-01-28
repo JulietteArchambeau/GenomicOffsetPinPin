@@ -1,0 +1,1653 @@
+---
+title: "Visualization of the weird climatic patterns observed between current EuMedCLim and future WorldClim"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=T)
+options(width = 300)
+library(knitr)
+library(reshape2)
+library(ggbiplot)
+library(dplyr)
+#library(devtools)
+#library(xtable)
+library(tidyverse)
+library(raster)
+library(rgeos)
+library(kableExtra)
+```
+
+```{r FuntionsOptionsUsed,echo=F}
+# Gray scale
+grayscale_colors <- gray.colors(100,            # number of different color levels
+                                start = 0.0,    # how black (0) to go
+                                end = 1.0,      # how white (1) to go
+                                gamma = 2.2,    # correction between how a digital
+                                # camera sees the world and how human eyes see it
+                                alpha = NULL)
+
+meanIgnoringZeroes <- function(x) {
+  mean(x[x!=0],na.rm=T)}
+```
+
+https://link.springer.com/article/10.1007/s00382-019-04831-z
+
+
+This script was done to look at the differences between current and future climate, with the EuMedClim and WorldClim databases. Initially, we used the EuMedClim database to describe the past/current climates and we used the future climate data from WorldClim. This leads to strange predictions regarding the regions that will be the most impacted, especially precipitation-related predictions. This script helped us to take the decision to use the current climate from WorlClim too -instead of EuMedClim-. Indeed, WorldClim is based on the CRU, while EuMedClim is based on E-OBS, which could explain the weird observed patterns.
+
+
+# Data
+
+Load the background. 
+
+```{r LoadBackground}
+background <- raster("data/maps/Hillshade/background.grd")
+```
+
+Load the maritime pine distribution. 
+
+```{r LoadMaritimePineDistriMask}
+PinpinDistri  <- shapefile('data/maps/MaskPinpinDistri/PinpinDistriEUforgen_NFIplotsBuffer10km.shp')
+```
+
+Load the current climate.
+
+```{r LoadStackAvgWaterLowRes}
+stackCurrClimRes25min <- stack("data/StacksEnvVars/CurrentClimate/Res25min/StackAvgWater.grd")
+```
+
+Load the future climate.
+
+```{r LoadFutureStackAvgWater}
+# scenarion SSP370
+path="data/StacksEnvVars/FutureClimate/2041to2060/SSP370/"
+ssp370stack.names <- list.files(path=path,pattern="^StackAvgWater.*grd$")
+ssp370stack <- lapply(ssp370stack.names, function(t) stack(paste0(path,t)))
+
+# scenarion SSP585
+path="data/StacksEnvVars/FutureClimate/2041to2060/SSP585/"
+ssp585stack.names <- list.files(path=path,pattern="^StackAvgWater.*grd$")
+ssp585stack <- lapply(ssp585stack.names, function(t) stack(paste0(path,t)))
+```
+
+# Using the scenario SP3-7.0
+
+Calculating the mean of the different GCMs.
+
+```{r MeanGCMsSSP370}
+var1 <- overlay(ssp370stack[[1]][[1]],
+                     ssp370stack[[2]][[1]],
+                     ssp370stack[[3]][[1]],
+                     ssp370stack[[4]][[1]],
+                     ssp370stack[[5]][[1]],
+                     ssp370stack[[6]][[1]],
+                     ssp370stack[[7]][[1]],
+                     ssp370stack[[8]][[1]],
+                     ssp370stack[[9]][[1]],
+                     fun=meanIgnoringZeroes)
+
+var2 <- overlay(ssp370stack[[1]][[2]],
+                     ssp370stack[[2]][[2]],
+                     ssp370stack[[3]][[2]],
+                     ssp370stack[[4]][[2]],
+                     ssp370stack[[5]][[2]],
+                     ssp370stack[[6]][[2]],
+                     ssp370stack[[7]][[2]],
+                     ssp370stack[[8]][[2]],
+                     ssp370stack[[9]][[2]],
+                     fun=meanIgnoringZeroes)
+
+var3 <- overlay(ssp370stack[[1]][[3]],
+                    ssp370stack[[2]][[3]],
+                    ssp370stack[[3]][[3]],
+                    ssp370stack[[4]][[3]],
+                    ssp370stack[[5]][[3]],
+                    ssp370stack[[6]][[3]],
+                    ssp370stack[[7]][[3]],
+                    ssp370stack[[8]][[3]],
+                    ssp370stack[[9]][[3]],
+                    fun=meanIgnoringZeroes)
+
+var4 <- overlay(ssp370stack[[1]][[4]],
+                    ssp370stack[[2]][[4]],
+                    ssp370stack[[3]][[4]],
+                    ssp370stack[[4]][[4]],
+                    ssp370stack[[5]][[4]],
+                    ssp370stack[[6]][[4]],
+                    ssp370stack[[7]][[4]],
+                    ssp370stack[[8]][[4]],
+                    ssp370stack[[9]][[4]],
+                    fun=meanIgnoringZeroes)
+
+meanStackAllGCMs <- stack(var1,
+                          var2,
+                          var3,
+                          var4,
+                          ssp370stack[[1]][[5]],
+                          ssp370stack[[1]][[6]],
+                          ssp370stack[[1]][[7]])
+
+names(meanStackAllGCMs) <- names(ssp370stack[[1]])
+```
+
+## Annual daily mean temperature
+
+```{r Bio1SSP370,fig.height=8,fig.width=16}
+layout(matrix(1:3,1,3))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual daily mean T°")
+plot(stackCurrClimRes25min[[1]],add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual daily mean T°")
+plot(meanStackAllGCMs[[1]],add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+
+# Difference btw future and current (Future-current)
+bio1 <- overlay(meanStackAllGCMs[[1]],
+                stackCurrClimRes25min[[1]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio1,add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+```
+
+## Mean diurnal temperature range
+
+```{r Bio2SSP370,fig.height=8,fig.width=16}
+layout(matrix(1:3,1,3))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current mean diurnal T° range")
+plot(stackCurrClimRes25min[[2]],add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future mean diurnal T° range")
+plot(meanStackAllGCMs[[2]],add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+
+bio2 <- overlay(meanStackAllGCMs[[2]],
+                stackCurrClimRes25min[[2]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio2,add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+```
+
+## Annual precipitation
+
+### Mean GCMs
+
+```{r Bio12SSP370,fig.height=14,fig.width=16}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(meanStackAllGCMs[[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(meanStackAllGCMs[[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation")
+plot(stackCurrClimRes25min[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+### Mapping each GCMs predictions
+
+```{r GCMsBio12,fig.height=10,fig.width=20}
+layout(matrix(1:10,2,5))
+plot(stackCurrClimRes25min[[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="CURRENT")
+plot(ssp370stack[[1]][[3]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="BCCCSM2MR")
+plot(ssp370stack[[2]][[3]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="CanESM5")
+plot(ssp370stack[[3]][[3]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="CNRMCM61")
+plot(ssp370stack[[4]][[3]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="CNRMESM21")
+plot(ssp370stack[[5]][[3]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="GFDLESM4")
+plot(ssp370stack[[6]][[3]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="IPSLCM6ALR")
+plot(ssp370stack[[7]][[3]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="MIROC6")
+plot(ssp370stack[[8]][[3]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="MIROCES2L")
+plot(ssp370stack[[9]][[3]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="MRIESM20")
+```
+
+#### GCM: BCC-CSM2-MR
+
+```{r Bio12BCCCSM2MR,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(ssp370stack[[1]][[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(ssp370stack[[1]][[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation")
+plot(stackCurrClimRes25min[[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(ssp370stack[[1]][[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio12 <- overlay(ssp370stack[[1]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio12 <- overlay(ssp370stack[[1]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+#### GCM: CanESM5
+
+
+```{r Bio12CanESM5,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(ssp370stack[[2]][[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(ssp370stack[[2]][[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[2]][[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio12 <- overlay(ssp370stack[[2]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio12 <- overlay(ssp370stack[[2]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: CNRM-CM6-1
+
+```{r Bio12CNRMCM61,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(ssp370stack[[3]][[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(ssp370stack[[3]][[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[3]][[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio12 <- overlay(ssp370stack[[3]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio12 <- overlay(ssp370stack[[3]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+#### GCM: CNRM-ESM2-1
+
+
+```{r Bio12CNRMESM21,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(ssp370stack[[4]][[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(ssp370stack[[4]][[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[4]][[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio12 <- overlay(ssp370stack[[4]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio12 <- overlay(ssp370stack[[4]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: GFDL-ESM4
+
+
+```{r Bio12GFDLESM4,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(ssp370stack[[5]][[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(ssp370stack[[5]][[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[5]][[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio12 <- overlay(ssp370stack[[5]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio12 <- overlay(ssp370stack[[5]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: IPSL-CM6A-LR
+
+
+```{r Bio12IPSLCM6ALR,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(ssp370stack[[6]][[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(ssp370stack[[6]][[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[6]][[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio12 <- overlay(ssp370stack[[6]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio12 <- overlay(ssp370stack[[6]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: MIROC6
+
+```{r Bio12MIROC6,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(ssp370stack[[7]][[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(ssp370stack[[7]][[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[7]][[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio12 <- overlay(ssp370stack[[7]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio12 <- overlay(ssp370stack[[7]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: MIROC-ES2L
+
+```{r Bio12MIROCES2L,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(ssp370stack[[8]][[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(ssp370stack[[8]][[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[8]][[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio12 <- overlay(ssp370stack[[8]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio12 <- overlay(ssp370stack[[8]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: MRI-ESM20
+
+```{r Bio12MRIESM20,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(ssp370stack[[9]][[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(ssp370stack[[9]][[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[9]][[3]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio12 <- overlay(ssp370stack[[9]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio12 <- overlay(ssp370stack[[9]][[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+### Current (reference) climate: 1901-1950
+
+```{r, eval=T,fig.height=14,fig.width=14}
+currbio12 <- raster::stack("data/climate/CurrentClimate/EuMedClim_Tiff_1901_1950/map_bio12_1901-1950_with_35_sampling_points.tif")
+names(currbio12) <- c("bio12")
+currbio12 <- raster::crop(currbio12,extent(meanStackAllGCMs[[3]]))
+currbio12 <- raster::resample(currbio12,meanStackAllGCMs[[3]])
+currbio12 <- mask(currbio12,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(currbio12),na.rm=T),min(values(meanStackAllGCMs[[3]]),na.rm=T)))
+maxv <- max(c(max(values(currbio12),na.rm=T),max(values(meanStackAllGCMs[[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (1901-1950)")
+plot(currbio12,add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                currbio12,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                currbio12,
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+### Current (reference) climate: 1980-2009
+
+```{r, eval=T,fig.height=14,fig.width=14}
+currbio12 <- raster::stack("data/climate/CurrentClimate/EuMedClim_Tiff_1980_2009/map_bio12_1980-2009_with_35_sampling_points.tif")
+names(currbio12) <- c("bio12")
+currbio12 <- raster::crop(currbio12,extent(meanStackAllGCMs[[3]]))
+currbio12 <- raster::resample(currbio12,meanStackAllGCMs[[3]])
+currbio12 <- mask(currbio12,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(currbio12),na.rm=T),min(values(meanStackAllGCMs[[3]]),na.rm=T)))
+maxv <- max(c(max(values(currbio12),na.rm=T),max(values(meanStackAllGCMs[[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (1980-2009)")
+plot(currbio12,add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                currbio12,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                currbio12,
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+### Current climate: WorldClim 1970-2000
+
+```{r, eval=T,fig.height=14,fig.width=14}
+wcbio12 <- raster::stack("data/climate/CurrentClimate/WorldClim30sec_1970_2000/wc2.1_30s_bio_12.tif")
+names(wcbio12) <- c("bio12")
+wcbio12 <- raster::crop(wcbio12,extent(meanStackAllGCMs[[3]]))
+wcbio12 <- raster::resample(wcbio12,meanStackAllGCMs[[3]])
+wcbio12 <- mask(wcbio12,PinpinDistri, updatevalue=NA)
+
+
+minv <- min(c(min(values(wcbio12),na.rm=T),min(values(meanStackAllGCMs[[3]]),na.rm=T)))
+maxv <- max(c(max(values(wcbio12),na.rm=T),max(values(meanStackAllGCMs[[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (WorldClim: 1970-2000)")
+plot(wcbio12,add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                wcbio12,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                wcbio12,
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+## Precipitation of the driest month
+
+### Mean GCMs
+
+
+```{r Bio14SSP370,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(meanStackAllGCMs[[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(meanStackAllGCMs[[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],zlim=c(minv,maxv),add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(meanStackAllGCMs[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference: future - climate
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Percentage of change.  
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     add=T,
+     zlim=c(-50,50),
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### Mapping each GCMs predictions
+
+```{r GCMsBio14,fig.height=10,fig.width=20}
+layout(matrix(1:10,2,5))
+plot(ssp370stack[[1]][[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="BCCCSM2MR")
+plot(ssp370stack[[2]][[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="CanESM5")
+plot(ssp370stack[[3]][[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="CNRMCM61")
+plot(ssp370stack[[4]][[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="CNRMESM21")
+plot(ssp370stack[[5]][[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="GFDLESM4")
+plot(ssp370stack[[6]][[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="IPSLCM6ALR")
+plot(ssp370stack[[7]][[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="MIROC6")
+plot(ssp370stack[[8]][[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="MIROCES2L")
+plot(ssp370stack[[9]][[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255),main="MRIESM20")
+plot(stackCurrClimRes25min[[4]],col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: BCC-CSM2-MR
+
+```{r Bio14BCCCSM2MR,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(ssp370stack[[1]][[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(ssp370stack[[1]][[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[1]][[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio14 <- overlay(ssp370stack[[1]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio14 <- overlay(ssp370stack[[1]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     add=T,
+     zlim=c(-50,50),
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+#### GCM: CanESM5
+
+
+```{r Bio14CanESM5,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(ssp370stack[[2]][[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(ssp370stack[[2]][[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[2]][[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio14 <- overlay(ssp370stack[[2]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio14 <- overlay(ssp370stack[[2]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     add=T,
+     zlim=c(-50,50),
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: CNRM-CM6-1
+
+```{r Bio14CNRMCM61,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(ssp370stack[[9]][[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(ssp370stack[[9]][[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[3]][[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio14 <- overlay(ssp370stack[[3]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio14 <- overlay(ssp370stack[[3]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     add=T,
+     zlim=c(-50,50),
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+#### GCM: CNRM-ESM2-1
+
+
+```{r Bio14CNRMESM21,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(ssp370stack[[4]][[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(ssp370stack[[4]][[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[4]][[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio14 <- overlay(ssp370stack[[4]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio14 <- overlay(ssp370stack[[4]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     zlim=c(-50,50),
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: GFDL-ESM4
+
+
+```{r Bio14GFDLESM4,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(ssp370stack[[5]][[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(ssp370stack[[5]][[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[5]][[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio14 <- overlay(ssp370stack[[5]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio14 <- overlay(ssp370stack[[5]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     zlim=c(-50,50),
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: IPSL-CM6A-LR
+
+
+```{r Bio14IPSLCM6ALR,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(ssp370stack[[6]][[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(ssp370stack[[6]][[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[6]][[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio14 <- overlay(ssp370stack[[6]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio14 <- overlay(ssp370stack[[6]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     zlim=c(-50,50),
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: MIROC6
+
+```{r Bio14MIROC6,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(ssp370stack[[7]][[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(ssp370stack[[7]][[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[7]][[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio14 <- overlay(ssp370stack[[7]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio14 <- overlay(ssp370stack[[7]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     zlim=c(-50,50),
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: MIROC-ES2L
+
+```{r Bio14MIROCES2L,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(ssp370stack[[8]][[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(ssp370stack[[8]][[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[8]][[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio14 <- overlay(ssp370stack[[8]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio14 <- overlay(ssp370stack[[8]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     zlim=c(-50,50),
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+#### GCM: MRI-ESM20
+
+```{r Bio14MRIESM20,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(ssp370stack[[9]][[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(ssp370stack[[9]][[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(ssp370stack[[9]][[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# Absolute difference
+bio14 <- overlay(ssp370stack[[9]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change
+bio14 <- overlay(ssp370stack[[9]][[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     add=T,
+     zlim=c(-50,50),
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+### Current climate: 1901-1950
+
+```{r, eval=T,fig.height=14,fig.width=14}
+currbio14 <- raster::stack("data/climate/CurrentClimate/EuMedClim_Tiff_1901_1950/map_bio14_1901-1950_with_35_sampling_points.tif")
+names(currbio14) <- c("bio14")
+currbio14 <- raster::crop(currbio14,extent(meanStackAllGCMs[[4]]))
+currbio14 <- raster::resample(currbio14,meanStackAllGCMs[[4]])
+currbio14 <- mask(currbio14,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(currbio14),na.rm=T),min(values(meanStackAllGCMs[[4]]),na.rm=T)))
+maxv <- max(c(max(values(currbio14),na.rm=T),max(values(meanStackAllGCMs[[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (1901-1950)")
+plot(currbio14,add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                currbio14,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# # percentage of change. 
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                currbio14,
+                fun=function(r1, r2){ifelse(r2<1,NA,r1*100/r2-100)})
+# 
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     zlim=c(-50,50),
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+### Current climate: 1980-2009
+
+```{r, eval=T,fig.height=14,fig.width=14}
+currbio14 <- raster::stack("data/climate/CurrentClimate/EuMedClim_Tiff_1980_2009/map_bio14_1980-2009_with_35_sampling_points.tif")
+names(currbio14) <- c("bio14")
+currbio14 <- raster::crop(currbio14,extent(meanStackAllGCMs[[4]]))
+currbio14 <- raster::resample(currbio14,meanStackAllGCMs[[4]])
+currbio14 <- mask(currbio14,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(currbio14),na.rm=T),min(values(meanStackAllGCMs[[4]]),na.rm=T)))
+maxv <- max(c(max(values(currbio14),na.rm=T),max(values(meanStackAllGCMs[[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (1980-2009)")
+plot(currbio14,add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[4]],add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                currbio14,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change.
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                currbio14,
+                fun=function(r1, r2){ifelse(r2<1,NA,r1*100/r2-100)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     zlim=c(-50,50),
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+
+### Current climate: WorldClim 1970-2000
+
+```{r, eval=T,fig.height=14,fig.width=14}
+wcbio14 <- raster::stack("data/climate/CurrentClimate/WorldClim30sec_1970_2000/wc2.1_30s_bio_14.tif")
+names(wcbio14) <- c("bio14")
+wcbio14 <- raster::crop(wcbio14,extent(meanStackAllGCMs[[4]]))
+wcbio14 <- raster::resample(wcbio14,meanStackAllGCMs[[4]])
+wcbio14 <- mask(wcbio14,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(wcbio14),na.rm=T),min(values(meanStackAllGCMs[[4]]),na.rm=T)))
+maxv <- max(c(max(values(wcbio14),na.rm=T),max(values(meanStackAllGCMs[[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation driest month (WorldClim: 1970-2000)")
+plot(wcbio14,add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation driest month")
+plot(meanStackAllGCMs[[4]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                wcbio14,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                wcbio14,
+                fun=function(r1, r2){ifelse(r2<1,NA,r1*100/r2-100)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     zlim=c(-20,5),
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+# Using the scenario SSP5-8.5
+
+Calculating the mean of the GCMs. 
+
+```{r MeanGCMsSSP585}
+var1 <- overlay(ssp585stack[[1]][[1]],
+                     ssp585stack[[2]][[1]],
+                     ssp585stack[[3]][[1]],
+                     ssp585stack[[4]][[1]],
+                     ssp585stack[[5]][[1]],
+                     ssp585stack[[6]][[1]],
+                     ssp585stack[[7]][[1]],
+                     ssp585stack[[8]][[1]],
+                     fun=meanIgnoringZeroes)
+
+var2 <- overlay(ssp585stack[[1]][[2]],
+                     ssp585stack[[2]][[2]],
+                     ssp585stack[[3]][[2]],
+                     ssp585stack[[4]][[2]],
+                     ssp585stack[[5]][[2]],
+                     ssp585stack[[6]][[2]],
+                     ssp585stack[[7]][[2]],
+                     ssp585stack[[8]][[2]],
+                     fun=meanIgnoringZeroes)
+
+var3 <- overlay(ssp585stack[[1]][[3]],
+                    ssp585stack[[2]][[3]],
+                    ssp585stack[[3]][[3]],
+                    ssp585stack[[4]][[3]],
+                    ssp585stack[[5]][[3]],
+                    ssp585stack[[6]][[3]],
+                    ssp585stack[[7]][[3]],
+                    ssp585stack[[8]][[3]],
+                    fun=meanIgnoringZeroes)
+
+var4 <- overlay(ssp585stack[[1]][[4]],
+                    ssp585stack[[2]][[4]],
+                    ssp585stack[[3]][[4]],
+                    ssp585stack[[4]][[4]],
+                    ssp585stack[[5]][[4]],
+                    ssp585stack[[6]][[4]],
+                    ssp585stack[[7]][[4]],
+                    ssp585stack[[8]][[4]],
+                    fun=meanIgnoringZeroes)
+
+meanStackAllGCMs <- stack(var1,
+                          var2,
+                          var3,
+                          var4,
+                          ssp585stack[[1]][[5]],
+                          ssp585stack[[1]][[6]],
+                          ssp585stack[[1]][[7]])
+
+names(meanStackAllGCMs) <- names(ssp585stack[[1]])
+```
+
+## Annual daily mean temperature
+
+```{r Bio1SSP585,fig.height=8,fig.width=16}
+layout(matrix(1:3,1,3))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual daily mean T°")
+plot(stackCurrClimRes25min[[1]],add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual daily mean T°")
+plot(meanStackAllGCMs[[1]],add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+
+# Difference btw future and current (Future-current)
+bio1 <- overlay(meanStackAllGCMs[[1]],
+                stackCurrClimRes25min[[1]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio1,add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+```
+
+## Current mean diurnal T° range
+
+```{r Bio2SSP585,fig.height=8,fig.width=16}
+layout(matrix(1:3,1,3))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current mean diurnal T° range")
+plot(stackCurrClimRes25min[[2]],add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future mean diurnal T° range")
+plot(meanStackAllGCMs[[2]],add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+
+bio2 <- overlay(meanStackAllGCMs[[2]],
+                stackCurrClimRes25min[[2]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio2,add=T,col=colorRampPalette(c("green","blue","yellow","red"))(255))
+```
+
+## Annual precipitation
+
+```{r Bio12SSP585,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[3]]),na.rm=T),min(values(meanStackAllGCMs[[3]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[3]]),na.rm=T),max(values(meanStackAllGCMs[[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation")
+plot(stackCurrClimRes25min[[3]],zlim=c(minv,maxv),add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[3]],zlim=c(minv,maxv),add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                stackCurrClimRes25min[[3]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+### Current climate: 1901-1950
+
+```{r, eval=T,fig.height=14,fig.width=14}
+currbio12 <- raster::stack("data/climate/CurrentClimate/EuMedClim_Tiff_1901_1950/map_bio12_1901-1950_with_35_sampling_points.tif")
+names(currbio12) <- c("bio12")
+currbio12 <- raster::crop(currbio12,extent(meanStackAllGCMs[[3]]))
+currbio12 <- raster::resample(currbio12,meanStackAllGCMs[[3]])
+currbio12 <- mask(currbio12,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(currbio12),na.rm=T),min(values(meanStackAllGCMs[[3]]),na.rm=T)))
+maxv <- max(c(max(values(currbio12),na.rm=T),max(values(meanStackAllGCMs[[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (1901-1950)")
+plot(currbio12,add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[3]],zlim=c(minv,maxv),add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                currbio12,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                currbio12,
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+### Current climate: 1980-2009
+
+```{r, eval=T,fig.height=14,fig.width=14}
+currbio12 <- raster::stack("data/climate/CurrentClimate/EuMedClim_Tiff_1980_2009/map_bio12_1980-2009_with_35_sampling_points.tif")
+names(currbio12) <- c("bio12")
+currbio12 <- raster::crop(currbio12,extent(meanStackAllGCMs[[3]]))
+currbio12 <- raster::resample(currbio12,meanStackAllGCMs[[3]])
+currbio12 <- mask(currbio12,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(currbio12),na.rm=T),min(values(meanStackAllGCMs[[3]]),na.rm=T)))
+maxv <- max(c(max(values(currbio12),na.rm=T),max(values(meanStackAllGCMs[[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (1980-2009)")
+plot(currbio12,add=T,zlim=c(minv,maxv),col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[3]],zlim=c(minv,maxv),add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                currbio12,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                currbio12,
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+### Current climate: WorldClim 1970-2000
+
+```{r, eval=T,fig.height=14,fig.width=14}
+wcbio12 <- raster::stack("data/climate/CurrentClimate/WorldClim30sec_1970_2000/wc2.1_30s_bio_12.tif")
+names(wcbio12) <- c("bio12")
+wcbio12 <- raster::crop(wcbio12,extent(meanStackAllGCMs[[3]]))
+wcbio12 <- raster::resample(wcbio12,meanStackAllGCMs[[3]])
+wcbio12 <- mask(wcbio12,PinpinDistri, updatevalue=NA)
+
+
+minv <- min(c(min(values(wcbio12),na.rm=T),min(values(meanStackAllGCMs[[3]]),na.rm=T)))
+maxv <- max(c(max(values(wcbio12),na.rm=T),max(values(meanStackAllGCMs[[3]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (WorldClim: 1970-2000)")
+plot(wcbio12,add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                wcbio12,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio12,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio12 <- overlay(meanStackAllGCMs[[3]],
+                wcbio12,
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio12,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+
+## Precipitation of the driest month
+
+```{r Bio14SSP585,fig.height=14,fig.width=14}
+minv <- min(c(min(values(stackCurrClimRes25min[[4]]),na.rm=T),min(values(meanStackAllGCMs[[4]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClimRes25min[[4]]),na.rm=T),max(values(meanStackAllGCMs[[4]]),na.rm=T)))
+
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation of the driest month")
+plot(stackCurrClimRes25min[[4]],zlim=c(minv,maxv),add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation of the driest month")
+plot(meanStackAllGCMs[[4]],zlim=c(minv,maxv),add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                stackCurrClimRes25min[[4]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+### Current climate: 1901-1950
+
+```{r, eval=T,fig.height=14,fig.width=14}
+currbio14 <- raster::stack("data/climate/CurrentClimate/EuMedClim_Tiff_1901_1950/map_bio14_1901-1950_with_35_sampling_points.tif")
+names(currbio14) <- c("bio14")
+currbio14 <- raster::crop(currbio14,extent(meanStackAllGCMs[[4]]))
+currbio14 <- raster::resample(currbio14,meanStackAllGCMs[[4]])
+currbio14 <- mask(currbio14,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(currbio14),na.rm=T),min(values(meanStackAllGCMs[[4]]),na.rm=T)))
+maxv <- max(c(max(values(currbio14),na.rm=T),max(values(meanStackAllGCMs[[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (1901-1950)")
+plot(currbio14,add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[3]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                currbio14,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change.
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                currbio14,
+                fun=function(r1, r2){ifelse(r2<1,NA,r1*100/r2-100)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     add=T,
+     zlim=c(-50,50),
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+
+### Current climate: 1980-2009
+
+```{r, eval=T,fig.height=14,fig.width=14}
+currbio14 <- raster::stack("data/climate/CurrentClimate/EuMedClim_Tiff_1980_2009/map_bio14_1980-2009_with_35_sampling_points.tif")
+names(currbio14) <- c("bio14")
+currbio14 <- raster::crop(currbio14,extent(meanStackAllGCMs[[4]]))
+currbio14 <- raster::resample(currbio14,meanStackAllGCMs[[4]])
+currbio14 <- mask(currbio14,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(currbio14),na.rm=T),min(values(meanStackAllGCMs[[4]]),na.rm=T)))
+maxv <- max(c(max(values(currbio14),na.rm=T),max(values(meanStackAllGCMs[[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current annual precipitation (1980-2009)")
+plot(currbio14,add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future annual precipitation")
+plot(meanStackAllGCMs[[4]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                currbio14,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change.
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                currbio14,
+                fun=function(r1, r2){ifelse(r2<1,NA,r1*100/r2-100)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     zlim=c(-50,50),
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
+### Current climate: WorldClim 1970-2000
+
+```{r, eval=T,fig.height=14,fig.width=14}
+wcbio14 <- raster::stack("data/climate/CurrentClimate/WorldClim30sec_1970_2000/wc2.1_30s_bio_14.tif")
+names(wcbio14) <- c("bio14")
+wcbio14 <- raster::crop(wcbio14,extent(meanStackAllGCMs[[4]]))
+wcbio14 <- raster::resample(wcbio14,meanStackAllGCMs[[4]])
+wcbio14 <- mask(wcbio14,PinpinDistri, updatevalue=NA)
+
+minv <- min(c(min(values(wcbio14),na.rm=T),min(values(meanStackAllGCMs[[4]]),na.rm=T)))
+maxv <- max(c(max(values(wcbio14),na.rm=T),max(values(meanStackAllGCMs[[4]]),na.rm=T)))
+
+layout(matrix(1:4,2,2))
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current precipitation driest month (WorldClim: 1970-2000)")
+plot(wcbio14,add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future precipitation driest month")
+plot(meanStackAllGCMs[[4]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                wcbio14,
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(bio14,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+bio14 <- overlay(meanStackAllGCMs[[4]],
+                wcbio14,
+                fun=function(r1, r2){ifelse(r2<1,NA,r1*100/r2-100)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(bio14,
+     add=T,
+     zlim=c(-20,5),
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+```
+
