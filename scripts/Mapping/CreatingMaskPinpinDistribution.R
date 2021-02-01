@@ -2,7 +2,7 @@
 # Mask of the maritime distribution for the maps
 ################################################
 
-library(raster)
+library(raster) # CRAN v3.3-13 
 
 # Maritime pine distribution from EUFORGEN (shapefile)
 PinpinDistri  <- shapefile('../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/Pinus_pinaster_EUFORGEN.shp')
@@ -15,7 +15,7 @@ PinpinDistri <- rgeos::gDifference(PinpinDistri,b)
 # To see the mask:
 # plot(PinpinDistri)
 
-# saving the mask:
+# Saving the mask (mask based only on EUFORGEN distribution)
 shapefile(PinpinDistri, filename='data/maps/MaskPinpinDistri/PinpinDistriEuforgen.shp', overwrite=TRUE)
 
 
@@ -23,6 +23,8 @@ shapefile(PinpinDistri, filename='data/maps/MaskPinpinDistri/PinpinDistriEuforge
 
 # We are going to expand the mask with the NFI plots
 #####################################################"
+
+# this is this mask that will be used in the study.
 
 # Load the data from Alexandre Changenet with the plot coordinates
 data <- readRDS(file="data/IFN/alexdata/dfplotPINPINA0.8R.M.rds")
@@ -68,6 +70,7 @@ mask <- rgeos::gDifference(mask,b)
 
 # saving the mask:
 shapefile(mask, filename='data/maps/MaskPinpinDistri/PinpinDistriEUforgen_NFIplotsBuffer10km.shp', overwrite=TRUE)
+
 
 
 
