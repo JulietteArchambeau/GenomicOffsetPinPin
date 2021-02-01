@@ -1,14 +1,17 @@
-########################################################################################################"
-######## Create rasters of climatic variables with the geographic coordinates of sampling points #######"
-########################################################################################################"
+##################################################################################################################"
+######## Create rasters of EuMedClim climatic variables with the geographic coordinates of sampling points #######"
+##################################################################################################################"
 
-# Function from Thibaut Fréjaville and Alexandre Changenet
+# Function from Thibaut Fréjaville
+
+# As we will not use the EuMedClim data finally, this script was not useful anymore.
+
 
 ### Required packages
-require(rgdal)
-require(raster)
+require(rgdal)  # CRAN v1.5-12
+require(raster) # CRAN v3.3-13
 require(parallel)
-require(fields)
+require(fields) # CRAN v10.3
 
 ### FUNCTION
 clim.map<-function(clim.var,period,fun.map='mean',extent.map=c(-20,60,20,72),xy=NULL,dir.in,download=F,dir.out=NULL,n.core=1,plot.map=T) {
@@ -177,6 +180,7 @@ period=c(1901:2009)
 # Set the function to compute mean, min or max values over the desired period
 fun.map='mean'# by default
 
+
 # Set the geographical extent of the map within [-20,60]°E [20,72]°N
 extent.map=c(-10,14,31,50)# full extent
 
@@ -220,4 +224,15 @@ for (i in c(1:length(eumedclim.vars))){
 
 
 
+# checking that the precipitation is not incluenced by the time window of the current climate:
 
+# extraction for the period 1901-1950
+eumedclim.vars <- c(eumedclim.vars[5],eumedclim.vars[7]) # keep only the precipitation of the driest month and the annual precipitation
+period=c(1901:1950)
+dir.out=paste0("data/climate/CurrentClimate/EuMedClim_Tiff_1901_1950/")
+
+
+# extraction for the period 1980-2009
+eumedclim.vars <- c(eumedclim.vars[5],eumedclim.vars[7]) # keep only the precipitation of the driest month and the annual precipitation
+period=c(1980:2009)
+dir.out=paste0("data/climate/CurrentClimate/EuMedClim_Tiff_1980_2009/")
