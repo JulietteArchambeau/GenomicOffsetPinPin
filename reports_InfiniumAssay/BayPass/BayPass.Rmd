@@ -220,6 +220,9 @@ topo <- topo %>% dplyr::select(prov,TRI_WGS84_90m_R) %>%
 
 env <- left_join(env,topo,by="prov") %>% select(prov,all_of(select.other.env))
 
+env <- merge(env,
+             readRDS(file="data/FireData/DfBurnedAreabyProv.rds") %>% select(BurnedArea,prov),by=c("prov"))
+
 identical(rownames(env$prov), rownames(df$prov)) # provenances are in the same order as in the genomic data
 
 # Format for BayPass
@@ -233,6 +236,8 @@ write.table(as.data.frame(t(DFenv[2,])), file = "outputs/CandidateSNPs/baypass/E
 write.table(as.data.frame(t(DFenv[3,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassBio13", sep = " ",
             row.names = FALSE, col.names = FALSE)
 write.table(as.data.frame(t(DFenv[4,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassSandTop", sep = " ",
+            row.names = FALSE, col.names = FALSE)
+write.table(as.data.frame(t(DFenv[5,])), file = "outputs/CandidateSNPs/baypass/EnvVariablesBayPassBurnedArea", sep = " ",
             row.names = FALSE, col.names = FALSE)
 ```
 
@@ -830,7 +835,7 @@ covaux.snp.res[which(abs(covaux.snp.res$M_Beta)>0.01),]
 > Let's compare with RDA outputs
 
 ```{r CompWithRDAoutputs}
-rda.cacand <- readRDS(file="outputs/CandidateSNPs/rda/185CandSNPsRDA_AvgWater.rds")
+rda.cacand <- readRDS(file="outputs/CandidateSNPs/rda/216CandSNPsRDA_AvgWater.rds")
 
 names.snp.df <- data.frame(MRK=1:length(colnames(geno)),snp=colnames(geno))
 head(names.snp.df )
@@ -1465,8 +1470,15 @@ covaux.snp.res[which(covaux.snp.res$BF.dB.>20),]
 In <span style="font-variant:small-caps;">BayPass</span> manual, contrarily to the MCMC model, it is not specify that we should use one covariate at a time. Nevertheless, as Santi told me that he uses IS with one covariate at a time, I check here that I obtain the same results one covariate at a time and all variables together.
 
 ```{r CreatedfIS}
-dfIS <- data.frame("BF.threshold (dB)"=c(20,10,5))
+dfIS <- data.frame("BF.threshold"=c(20,10,5))
 ```
+
+Which threshold do we choose?
+
+```{r thresholdIS}
+threshold <- 5 # in dB
+```
+
 
 
 ## Running and checking
@@ -1511,6 +1523,18 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+Plotting the first run:
+
+```{r PlotsISCovariateModelBio1, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+Checking whether the 5 runs are consistent. 
+
 ```{r CheckingConvergenceISBio1, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -1537,26 +1561,18 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis5_summary_
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelBio1, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio1/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
-
 ```{r IdentifySNPsISCovariateModelBio1,eval=T}
-dfIS <- dfIS %>% mutate(bio1=c(length(which(covis.snp.res$BF.dB.>20)),
-                               length(which(covis.snp.res$BF.dB.>10)),
-                               length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "bio1"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- covis.snp.res[which(covis.snp.res$BF.dB.>5),]
+dfIS <- dfIS %>% mutate(bio1=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "bio1"
+candBaypass <- outIS[which(outIS$medianBF>threshold),]
+candBaypass
 ```
 
 #### bio2
@@ -1599,6 +1615,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelBio2, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISBio2, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -1625,27 +1649,20 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis5_summary_
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelBio2, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio2/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
-
 ```{r IdentifySNPsISCovariateModelBio2,eval=T}
-dfIS <- dfIS %>% mutate(bio2=c(length(which(covis.snp.res$BF.dB.>20)),
-                               length(which(covis.snp.res$BF.dB.>10)),
-                               length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "bio2"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+dfIS <- dfIS %>% mutate(bio2=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "bio2"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
 ```
+
 
 #### bio12
 
@@ -1687,6 +1704,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelBio12, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISBio12, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -1713,27 +1738,20 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis5_summary
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelBio12, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio12/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
-
 ```{r IdentifySNPsISCovariateModelBio12,eval=T}
-dfIS <- dfIS %>% mutate(bio12=c(length(which(covis.snp.res$BF.dB.>20)),
-                                length(which(covis.snp.res$BF.dB.>10)),
-                                length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "bio12"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+dfIS <- dfIS %>% mutate(bio12=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "bio12"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
 ```
+
 
 #### bio14
 
@@ -1775,6 +1793,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelBio14, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISBio14, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -1801,27 +1827,20 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis5_summary
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelBio14, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio14/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
-
 ```{r IdentifySNPsISCovariateModelBio14,eval=T}
-dfIS <- dfIS %>% mutate(bio14=c(length(which(covis.snp.res$BF.dB.>20)),
-                                length(which(covis.snp.res$BF.dB.>10)),
-                                length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "bio14"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+dfIS <- dfIS %>% mutate(bio14=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "bio14"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
 ```
+
 
 #### bio13
 
@@ -1863,6 +1882,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelBio13, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISBio13, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -1889,27 +1916,20 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis5_summary
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelBio13, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio13/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
-
 ```{r IdentifySNPsISCovariateModelBio13,eval=T}
-dfIS <- dfIS %>% mutate(bio13=c(length(which(covis.snp.res$BF.dB.>20)),
-                                length(which(covis.snp.res$BF.dB.>10)),
-                                length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "bio13"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+dfIS <- dfIS %>% mutate(bio13=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "bio13"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
 ```
+
 
 #### bio5
 
@@ -1951,6 +1971,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelBio5, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISBio5, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -1977,27 +2005,20 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis5_summary_
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelBio5, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio5/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
-
 ```{r IdentifySNPsISCovariateModelBio5,eval=T}
-dfIS <- dfIS %>% mutate(bio5=c(length(which(covis.snp.res$BF.dB.>20)),
-                                length(which(covis.snp.res$BF.dB.>10)),
-                                length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "bio15"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+dfIS <- dfIS %>% mutate(bio5=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "bio5"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
 ```
+
 
 #### bio6
 
@@ -2039,6 +2060,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelBio6, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISBio6, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -2065,27 +2094,20 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis5_summary_
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelBio6, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBio6/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
-
 ```{r IdentifySNPsISCovariateModelBio6,eval=T}
-dfIS <- dfIS %>% mutate(bio6=c(length(which(covis.snp.res$BF.dB.>20)),
-                                length(which(covis.snp.res$BF.dB.>10)),
-                                length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "bio6"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+dfIS <- dfIS %>% mutate(bio6=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "bio6"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
 ```
+
 
 #### water_top
 
@@ -2127,6 +2149,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelWaterTop, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISWaterTop, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -2153,27 +2183,20 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis5_summ
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelWaterTop, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsWaterTop/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
-
 ```{r IdentifySNPsISCovariateModelWaterTop,eval=T}
-dfIS <- dfIS %>% mutate(water_top=c(length(which(covis.snp.res$BF.dB.>20)),
-                                    length(which(covis.snp.res$BF.dB.>10)),
-                                    length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "water_top"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+dfIS <- dfIS %>% mutate(water_top=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "water_top"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
 ```
+
 
 #### sand_top
 
@@ -2215,6 +2238,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelSandTop, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISSandTop, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -2241,27 +2272,21 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis5_summa
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelSandTop, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsSandTop/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
 
 ```{r IdentifySNPsISCovariateModelSandTop,eval=T}
-dfIS <- dfIS %>% mutate(sand_top=c(length(which(covis.snp.res$BF.dB.>20)),
-                                    length(which(covis.snp.res$BF.dB.>10)),
-                                    length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "sand_top"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+dfIS <- dfIS %>% mutate(sand_top=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "sand_top"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
 ```
+
 
 #### depth_roots
 
@@ -2303,6 +2328,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelDepthRoots, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISDepthRoots, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -2329,27 +2362,21 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis5_su
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelDepthRoots, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsDepthRoots/anacovis1_summary_betai_reg.out",h=T)
-layout(matrix(1:3,3,1))
-plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
-plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
-plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
-```
 
 ```{r IdentifySNPsISCovariateModelDepthRoots,eval=T}
-dfIS <- dfIS %>% mutate(depth_roots=c(length(which(covis.snp.res$BF.dB.>20)),
-                                      length(which(covis.snp.res$BF.dB.>10)),
-                                      length(which(covis.snp.res$BF.dB.>5))))
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "depth_roots"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+dfIS <- dfIS %>% mutate(depth_roots=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "depth_roots"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
 ```
+
 
 #### TRI
 
@@ -2391,6 +2418,14 @@ cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/I
     -outprefix anacovis5
 ```
 
+```{r PlotsISCovariateModelTRI, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis1_summary_betai_reg.out",h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
 ```{r CheckingConvergenceISTRI, eval=T}
 # Bayes factors
 BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
@@ -2417,27 +2452,109 @@ beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis5_summary_b
 cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
 
-```{r PlotsISCovariateModelTRI, fig.height=10,fig.width=14,eval=T}
-covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsTRI/anacovis1_summary_betai_reg.out",h=T)
+```{r IdentifySNPsISCovariateModelTRI,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
+
+dfIS <- dfIS %>% mutate(TRI=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "TRI"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
+```
+
+
+#### Burned area
+
+```{bash ISAuxModelBurnedArea, eval=F}
+cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISrunsBurnedArea
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -efile ../EnvVariablesBayPassBurnedArea \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis1
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 444 \
+    -efile ../EnvVariablesBayPassBurnedArea \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis2
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 204 \
+    -efile ../EnvVariablesBayPassBurnedArea \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis3
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 284 \
+    -efile ../EnvVariablesBayPassBurnedArea \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis4
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../5165snps523genotypesImpNABayPass \
+    -seed 428 \
+    -efile ../EnvVariablesBayPassBurnedArea \
+    -omegafile ../anacore_mat_omega.out \
+    -outprefix anacovis5
+```
+
+```{r PlotsISCovariateModelBurnedArea, fig.height=10,fig.width=14,eval=T}
+covis.snp.res=read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis1_summary_betai_reg.out",h=T)
 layout(matrix(1:3,3,1))
 plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
 plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
 plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
 ```
 
-```{r IdentifySNPsISCovariateModelTRI,eval=T}
-dfIS <- dfIS %>% mutate(TRI=c(length(which(covis.snp.res$BF.dB.>20)),
-                              length(which(covis.snp.res$BF.dB.>10)),
-                              length(which(covis.snp.res$BF.dB.>5))))
+```{r CheckingConvergenceISBurnedArea, eval=T}
+# Bayes factors
+BF1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis1_summary_betai_reg.out",h=T)$BF.dB.
+BF2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis2_summary_betai_reg.out",h=T)$BF.dB.
+BF3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis3_summary_betai_reg.out",h=T)$BF.dB.
+BF4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis4_summary_betai_reg.out",h=T)$BF.dB.
+BF5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis5_summary_betai_reg.out",h=T)$BF.dB.
+cor(data.frame(BF1,BF2,BF3,BF4,BF5))
 
-# Identify the SNPs with BF > 5dB
-for(i in rownames(covis.snp.res)[which(covis.snp.res$BF.dB.>5)]){
-  covis.snp.res[rownames(covis.snp.res)==i,"snp"] <- rownames(dfsum1)[as.numeric(i)]
-}
-covis.snp.res$COVARIABLE <- "TRI"
-covis.snp.res[which(covis.snp.res$BF.dB.>5),]
-candBaypass <- bind_rows(candBaypass,covis.snp.res[which(covis.snp.res$BF.dB.>5),])
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis1_summary_pi_xtx.out",h=T)$XtXst
+XtXst2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis2_summary_pi_xtx.out",h=T)$XtXst
+XtXst3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis3_summary_pi_xtx.out",h=T)$XtXst
+XtXst4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis4_summary_pi_xtx.out",h=T)$XtXst
+XtXst5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis5_summary_pi_xtx.out",h=T)$XtXst
+cor(data.frame(XtXst1,XtXst2,XtXst3,XtXst4,XtXst5))
+
+# Regression coefficients Beta_is
+beta1 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis1_summary_betai_reg.out",h=T)$Beta_is
+beta2 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis2_summary_betai_reg.out",h=T)$Beta_is
+beta3 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis3_summary_betai_reg.out",h=T)$Beta_is
+beta4 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis4_summary_betai_reg.out",h=T)$Beta_is
+beta5 <- read.table("outputs/CandidateSNPs/baypass/ISrunsBurnedArea/anacovis5_summary_betai_reg.out",h=T)$Beta_is
+cor(data.frame(beta1,beta2,beta3,beta4,beta5))
 ```
+
+```{r IdentifySNPsISCovariateModelBurnedArea,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(data.frame(BF1,BF2,BF3,BF4,BF5),1,median),
+                  medianBeta=apply(data.frame(beta1,beta2,beta3,beta4,beta5),1,median))
+
+dfIS <- dfIS %>% mutate(BurnedArea=c(length(which(outIS$medianBF>20)),
+                               length(which(outIS$medianBF>10)),
+                               length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- "BurnedArea"
+outIS[which(outIS$medianBF>threshold),]
+candBaypass <- bind_rows(candBaypass,outIS[which(outIS$medianBF>threshold),])
+```
+
 
 #### Sum-up candidates
 
@@ -2450,6 +2567,13 @@ candBaypass %>% kable() %>%
   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
 ```
 
+```{r SaveCandSNPsBayPass}
+saveRDS(candBaypass,file=paste0("outputs/CandidateSNPs/baypass/CandSNPsBayPass.rds"))
+```
+
+
+`r knitr::opts_chunk$set(eval = F)`
+   
 #### Common candidates btw RDA and Baypass
 
 Let's look at the SNPs that were both selected by the RDA and <span style="font-variant:small-caps;">BayPass</span>. 
@@ -2457,14 +2581,14 @@ Let's look at the SNPs that were both selected by the RDA and <span style="font-
 > Set AvgWater
 
 ```{r displayCommonCand_AvgWater}
-candRDA <- readRDS(file="outputs/CandidateSNPs/rda/185CandSNPsRDA_AvgWater.rds")
+candRDA <- readRDS(file="outputs/CandidateSNPs/rda/216CandSNPsRDA_AvgWater.rds")
 length(candRDA$snp)
 
 comcand <- candBaypass %>% 
-  filter(COVARIABLE %in% c("bio1","bio2","bio12","bio14","water_top","depth_roots","TRI")) %>% 
+  filter(COVARIABLE %in% c("bio1","bio2","bio12","bio14","water_top","depth_roots","TRI","BurnedArea")) %>% 
   inner_join(candRDA,by="snp") %>% 
-  select(snp,COVARIABLE,BF.dB.,Beta_is,loading,contains("bio"),water_top,depth_roots,TRI) %>% 
-  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=BF.dB.,beta.Baypass=Beta_is,
+  select(snp,COVARIABLE,medianBF,medianBeta,loading,contains("bio"),water_top,depth_roots,TRI) %>% 
+  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=medianBF,beta.Baypass=medianBeta,
          beta.bio1.RDA=bio1,
          beta.bio2.RDA=bio2,
          beta.bio12.RDA=bio12,
@@ -2489,8 +2613,8 @@ length(candRDA$snp)
 comcand <- candBaypass %>% 
   filter(COVARIABLE %in% c("bio1","bio2","bio12","bio14","sand_top","depth_roots","TRI")) %>% 
   inner_join(candRDA,by="snp") %>% 
-  select(snp,COVARIABLE,BF.dB.,Beta_is,loading,contains("bio"),sand_top,depth_roots,TRI) %>% 
-  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=BF.dB.,beta.Baypass=Beta_is,
+  select(snp,COVARIABLE,medianBF,medianBeta,loading,contains("bio"),sand_top,depth_roots,TRI) %>% 
+  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=medianBF,beta.Baypass=medianBeta,
          beta.bio1.RDA=bio1,
          beta.bio2.RDA=bio2,
          beta.bio12.RDA=bio12,
@@ -2515,8 +2639,8 @@ length(candRDA$snp)
 comcand <- candBaypass %>% 
   filter(COVARIABLE %in% c("bio13","bio14","bio5","bio6","water_top","depth_roots","TRI")) %>% 
   inner_join(candRDA,by="snp") %>% 
-  select(snp,COVARIABLE,BF.dB.,Beta_is,loading,contains("bio"),water_top,depth_roots,TRI) %>% 
-  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=BF.dB.,beta.Baypass=Beta_is,
+  select(snp,COVARIABLE,medianBF,medianBeta,loading,contains("bio"),water_top,depth_roots,TRI) %>% 
+  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=medianBF,beta.Baypass=medianBeta,
          beta.bio5.RDA=bio5,
          beta.bio6.RDA=bio6,
          beta.bio13.RDA=bio13,
@@ -2541,8 +2665,10 @@ length(candRDA$snp)
 comcand <- candBaypass %>% 
   filter(COVARIABLE %in% c("bio13","bio14","bio5","bio6","sand_top","depth_roots","TRI")) %>% 
   inner_join(candRDA,by="snp") %>% 
-  select(snp,COVARIABLE,BF.dB.,Beta_is,loading,contains("bio"),sand_top,depth_roots,TRI) %>% 
-  dplyr::rename(varBaypass=COVARIABLE,BF.Baypass=BF.dB.,beta.Baypass=Beta_is,
+  select(snp,COVARIABLE,medianBF,medianBeta,loading,contains("bio"),sand_top,depth_roots,TRI) %>% 
+  dplyr::rename(varBaypass=COVARIABLE,
+         BF.Baypass=medianBF,
+         beta.Baypass=medianBeta,
          beta.bio5.RDA=bio5,
          beta.bio6.RDA=bio6,
          beta.bio13.RDA=bio13,

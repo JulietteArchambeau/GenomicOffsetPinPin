@@ -26,10 +26,10 @@ plot(PinpinDistri)
 
 #  Climatic variables ####
 # > from set AvgSand and AvgWater
-grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
+grids <- list.files("data/climate/CurrentClimate/EuMedClim_Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
 grids <- grids[grepl("bio1_|bio12_|bio14_|bio2_",grids)==T]
 grids <- c(grids[[1]],grids[[4]],grids[[2]],grids[[3]])
-rast.clim <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
+rast.clim <- raster::stack(paste0("data/climate/CurrentClimate/EuMedClim_Tiff_1901_2009/", grids))
 names(rast.clim) <- c("bio1","bio2","bio12","bio14")
 rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
 
@@ -77,9 +77,9 @@ writeRaster(stackall, filename="data/StacksEnvVars/StackAvgWater.grd", format="r
   
 #  Climatic variables ####
 # > from set ExtSand and ExtWater
-grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
+grids <- list.files("data/climate/CurrentClimate/EuMedClim_Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
 grids <- grids[grepl("bio13_|bio14_|bio5_|bio6_",grids)==T]
-rast.clim <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
+rast.clim <- raster::stack(paste0("data/climate/CurrentClimate/EuMedClim_Tiff_1901_2009/", grids))
 names(rast.clim) <- c("bio13","bio14","bio5","bio6")
 rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
 
@@ -109,18 +109,18 @@ writeRaster(stackall, filename="data/StacksEnvVars/StackExtWater.grd", format="r
 #  A) Set AvgWater                                                                                           ####
 #     -----------                                                                                            #
 
-rast.to.crop <- raster("data/climate/Tiff_1901_2009/map_bio1_1901-2009_with_34_sampling_points.tif")
+rast.to.crop <- raster("data/climate/CurrentClimate/EuMedClim_Tiff_1901_2009/map_bio1_1901-2009_with_34_sampling_points.tif")
 
-GCMs <- list.files("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/")
+GCMs <- list.files("data/climate/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/")
 
 
 # 2041-2060 - SSP370 - All GCMs                                                                               ####
 
 for(i in GCMs){
   
-  rast.clim <- stack(paste0("data/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/",i,"/ssp370/wc2.1_2.5m_bioc_",i,"_ssp370_2041-2060.tif"))
+  rast.clim <- stack(paste0("data/climate/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/",i,"/ssp370/wc2.1_2.5m_bioc_",i,"_ssp370_2041-2060.tif"))
   
-  # I understand that these variables here are the WorldClim bioclimatic variables averaged over the period 2041/2060.
+  # I understand that these 19 variables here are the WorldClim bioclimatic variables averaged over the period 2041/2060.
   
   select.layers <- names(rast.clim)[grepl("2060.1$|2060.2|2060.12|2060.14",names(rast.clim))==T]
   rast.clim <- raster::subset(rast.clim,select.layers)
@@ -207,10 +207,10 @@ for(i in GCMs){
 rast.to.crop <- stack("data/StacksEnvVars/FutClimStacks/2041to2060/SSP585/StackAvgWater_BCCCSM2MR.grd")
 
 # Climatic rasters ####
-grids <- list.files("data/climate/Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
+grids <- list.files("data/climate/CurrentClimate/EuMedClim_Tiff_1901_2009/" , pattern = "*1901-2009_with_34_sampling_points.tif$")
 grids <- grids[grepl("bio1_|bio2_|bio12_|bio14_",grids)==T]
 grids <- c(grids[[1]],grids[[4]],grids[[2]],grids[[3]])
-rast.clim <- raster::stack(paste0("data/climate/Tiff_1901_2009/", grids))
+rast.clim <- raster::stack(paste0("data/climate/CurrentClimate/EuMedClim_Tiff_1901_2009/", grids))
 names(rast.clim) <- c("bio1","bio2","bio12","bio14")
 rast.clim <- raster::crop(rast.clim,extent(rast.to.crop))
 rast.clim <- raster::resample(rast.clim,rast.to.crop)

@@ -10,6 +10,8 @@
 
 # This script has to be run from bash because it crashes in RStudio
 
+setwd('~/Documents/GenomicOffset/GenomicOffsetPinPin/')
+
 start_time <- Sys.time()
 
 # libraries
@@ -25,12 +27,14 @@ library(doParallel)
 
 # Parameters to select:
 site="caceres"
-covar <- c("bio12","bio14") # all variables significant in Caceres
+#covar <- c("bio12","bio14") # all variables significant in Caceres
+covar <- c("bio14")
 #covar <- c("bio2","bio12","bio14")
 #covar <- c("bio2","bio5","bio6","bio12","bio13","bio14") # all avariables significant in Madrid
-SNPset <- c("MergedCand","ComCand","IntCand")
+#SNPset <- c("MergedCand","ComCand","IntCand")
+SNPset <- c("IntCand")
 CovSet <- "AvgWater"
-nsample <- 10
+nsample <- 1000
 
 
 

@@ -135,67 +135,107 @@ shapefile(countries, "data/FireData/GFED4/Raw/countries.shp")
 
 # Raster for the genomic analyses 
 
+## create and save the raster
+
 ```{r RasterForGenomicAnalyses, eval=F}
 countries <- shapefile("data/FireData/GFED4/Raw/countries.shp")
-BurnedAreas <- raster::brick("data/FireData/GFED4/Raw/GFED4_199507_201412.grd")
+BurnedArea <- raster::brick("data/FireData/GFED4/Raw/GFED4_199507_201412.grd")
 
 # Applying the scale factor = 0.01
-BurnedAreas <- BurnedAreas * 0.01
+BurnedArea <- BurnedArea * 0.01
 
 # Set extent
-raster::extent(BurnedAreas) <- raster::extent(-180, 180, -90, 90)
+raster::extent(BurnedArea) <- raster::extent(-180, 180, -90, 90)
 
 # Assign CRS (WGS84)
-raster::crs(BurnedAreas) <-  "+proj=longlat +datum=WGS84 +no_defs"
+raster::crs(BurnedArea) <-  "+proj=longlat +datum=WGS84 +no_defs"
 
 # Mask and crop burned areas over Europe
-BurnedAreas <- mask_crop_subset(r = BurnedAreas, p = countries)
+BurnedArea <- mask_crop_subset(r = BurnedArea, p = countries)
 
 # Mean over the period of interest
-BurnedAreas <- calc(BurnedAreas, mean)
+BurnedArea <- calc(BurnedArea, mean)
 
-plot(BurnedAreas)
+# Assign the extent of interest
+BurnedArea <- extend(BurnedArea,extent(-10,14,31,50))
 
-writeRaster(BurnedAreas,"data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
+plot(BurnedArea)
+
+writeRaster(BurnedArea,"data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
 ```
 
+## visualize
 
 ```{r VisualizeRasterGenomic,fig.height=8,fig.width=8}
 plot(raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd"))
 ```
 
+## extract values at the provenance coordinates
 
-## Raster for the NFI models
+```{r FireDataCoordProv,fig.height=8,fig.width=8}
+# Raster of the burned areas (with the same number of values as in the climatic rasters)
+rast <- raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
+rast.clim <- raster("data/climate/CurrentClimate/EuMedClim_Tiff_1901_2009/map_bio1_1901-2009_with_34_sampling_points.tif")
+rast <- raster::resample(rast,rast.clim)
+
+# Provenances coordinates
+df <- readRDS(file="data/AllDataPhenoClimSoil.RDS") %>% 
+  dplyr::select(prov,longitude_prov,latitude_prov) %>% 
+  dplyr::rename(longitude=longitude_prov,latitude=latitude_prov) %>% 
+  unique()
+df <- df[!(df$prov=="ROD"),]
+
+coord <- SpatialPoints(df[,c("longitude","latitude")], proj4string=CRS("+proj=longlat +datum=WGS84 +no_defs"))
+
+# Mapping
+plot(rast)
+plot(coord,add=T)
+
+# Extract values
+df$BurnedArea <- raster::extract(rast,df[,c("longitude","latitude")],method="bilinear")
+
+# NAs for the provenance "OLO". So we assign the value of the average value of the cell around (buffer=8km)
+df[df$prov=="OLO","BurnedArea"] <- mean(unlist(raster::extract(rast,df[df$prov=="OLO",c("longitude","latitude")],buffer=8000)),na.rm=T)
+
+df %>% remove_rownames() %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+#saveRDS(df,"data/FireData/DfBurnedAreabyProv.rds")
+```
+
+
+# Raster for the NFI models
 
 ```{r RasterForNFIModels, eval=F}
 Spain <- raster::getData(name = "GADM", country = "Spain", path="data/FireData/GFED4/Raw/",level = 0)
 France <- raster::getData(name = "GADM", country = "France", path="data/FireData/GFED4/Raw/", level = 0)
-BurnedAreas <- raster::brick("data/FireData/GFED4/Raw/GFED4_199507_201412.grd")
+BurnedArea <- raster::brick("data/FireData/GFED4/Raw/GFED4_199507_201412.grd")
 
 # Applying the scale factor = 0.01
-BurnedAreas <- BurnedAreas * 0.01
+BurnedArea <- BurnedArea * 0.01
 
 # Set extent
-raster::extent(BurnedAreas) <- raster::extent(-180, 180, -90, 90)
+raster::extent(BurnedArea) <- raster::extent(-180, 180, -90, 90)
 
 # Assign CRS (WGS84)
-raster::crs(BurnedAreas) <-  "+proj=longlat +datum=WGS84 +no_defs"
+raster::crs(BurnedArea) <-  "+proj=longlat +datum=WGS84 +no_defs"
 
 
 # If observations layers have no date, assign it!
 dataDates <- seq.Date(from = as.Date("1995-07-01"),
                       to = as.Date("2014-12-01"), 
                       by = "month")
-names(BurnedAreas) <- dataDates
+names(BurnedArea) <- dataDates
 
 # Mask and crop burned areas over Spain
-BaSp <- mask_crop_subset(r = BurnedAreas, p = Spain)
-BaFr <- mask_crop_subset(r = BurnedAreas, p = France)
+BaSp <- mask_crop_subset(r = BurnedArea, p = Spain)
+BaFr <- mask_crop_subset(r = BurnedArea, p = France)
 
 BaSp <- BaSp[[1:162]] # from July 1995 to December 2008 (range of the third Spanih Inventory)
 BaSp <- calc(BaSp, mean)
 
-BaFr <- BaFr[[115:length(names(BaFr))]] # from July 1995 to December 2008 (range of the third Spanih Inventory)
+BaFr <- BaFr[[115:length(names(BaFr))]] # from January 2005 to December 2014 (range of the French NFI)
 BaFr <- calc(BaFr, mean)
 
 rast <- merge(BaFr,BaSp)

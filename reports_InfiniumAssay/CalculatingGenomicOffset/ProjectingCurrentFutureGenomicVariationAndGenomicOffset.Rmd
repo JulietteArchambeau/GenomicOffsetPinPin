@@ -1,0 +1,803 @@
+---
+title: Projecting  under current and future climates the genomic variation and calculating
+  the genomic offset
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=TRUE,cache.lazy = FALSE)
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)
+library(hierfstat)
+library(reshape2)
+library(ggbiplot)
+library(gdm)
+#library(cowplot)
+#library(ggplot2)
+#library(ggpubr)
+#library(stringi)
+library(beepr)
+library(dplyr)
+#library(devtools)
+#library(xtable)
+library(tidyverse)
+#library(tibble)
+library(gradientForest)
+library(raster)
+library(sgdm)
+library(rgeos)
+library(kableExtra)
+```
+
+```{r FuntionsOptionsUsed,echo=F}
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+# Gray scale
+grayscale_colors <- gray.colors(100,            # number of different color levels
+                                start = 0.0,    # how black (0) to go
+                                end = 1.0,      # how white (1) to go
+                                gamma = 2.2,    # correction between how a digital
+                                # camera sees the world and how human eyes see it
+                                alpha = NULL)
+```
+
+# DATA
+
+## Mapping
+
+### Maritime pine distribution (mask)
+
+We load the shapefile of the maritime pin distribution that comes from EUFORGEN and that we will use as a mask in the maps.
+
+```{r LoadMaritimePineDistriMask}
+PinpinDistri  <- shapefile('data/maps/MaskPinpinDistri/PinpinDistriEUforgen_NFIplotsBuffer10km.shp')
+```
+
+### Hillshade (background)
+
+We load the hillshade background.
+
+```{r LoadBackground}
+background <- raster("data/maps/Hillshade/background.grd")
+```
+
+## Env data: AvgWater
+
+
+
+```{r}
+select.var.AvgWater <- c("bio1","bio2","bio12","bio14","water_top","depth_roots","TRI")
+```
+
+
+### Rasters of current climatic, soil and topographic variables
+
+> Resolution ~ 1 km2 (30arc sec)
+
+(0.93 x 0.93 = 0.86 km2 at the equator)
+
+```{r LoadStackAvgWater}
+stackCurrClimRes30sec <- stack("data/StacksEnvVars/CurrentClimate/Res30seconds/StackAvgWater.grd")
+```
+
+> Resolution ~ 30.869 km2 (2.5 minutes)
+
+(5.556 x 5.556 at the equator)
+
+```{r LoadStackAvgWaterLowRes}
+stackCurrClimRes25min <- stack("data/StacksEnvVars/CurrentClimate/Res25min/StackAvgWater.grd")
+```
+
+### Rasters of future climatic, soil and topographic variables
+
+```{r LoadFutureStackAvgWater}
+# scenarion SSP370
+path="data/StacksEnvVars/FutureClimate/2041to2060/SSP370/"
+ssp370stack.names <- list.files(path=path,pattern="^StackAvgWater.*grd$")
+ssp370stack <- lapply(ssp370stack.names, function(t) stack(paste0(path,t)))
+
+# scenarion SSP585
+path="data/StacksEnvVars/FutureClimate/2041to2060/SSP585/"
+ssp585stack.names <- list.files(path=path,pattern="^StackAvgWater.*grd$")
+ssp585stack <- lapply(ssp585stack.names, function(t) stack(paste0(path,t)))
+```
+
+```{r AvgStackGCMsSSP370, cache=T}
+meanIgnoringZeroes <- function(x) {
+  mean(x[x!=0],na.rm=T)}
+
+AveragingClimGCMs <- function(clim.var,clim.stack){
+  mean.clim <- overlay(
+          clim.stack[[1]][[clim.var]],
+          clim.stack[[2]][[clim.var]],
+          clim.stack[[3]][[clim.var]],
+          clim.stack[[4]][[clim.var]],
+          clim.stack[[5]][[clim.var]],
+          clim.stack[[6]][[clim.var]],
+          clim.stack[[7]][[clim.var]],
+          clim.stack[[8]][[clim.var]],
+          clim.stack[[9]][[clim.var]],
+          fun=meanIgnoringZeroes)
+  return(mean.clim)
+  }
+
+avgbio1 <- AveragingClimGCMs(clim.var="bio1",clim.stack = ssp370stack)
+avgbio2 <- AveragingClimGCMs(clim.var="bio2",clim.stack = ssp370stack)
+avgbio12 <- AveragingClimGCMs(clim.var="bio12",clim.stack = ssp370stack)
+avgbio14 <- AveragingClimGCMs(clim.var="bio14",clim.stack = ssp370stack)
+
+
+ssp370stackavg <- stack(avgbio1,
+                     avgbio2,
+                     avgbio12,
+                     avgbio14,
+                     ssp370stack[[1]][["water_top"]],
+                     ssp370stack[[1]][["depth_roots"]],
+                     ssp370stack[[1]][["TRI"]])
+
+names(ssp370stackavg) <- select.var.AvgWater
+```
+
+
+# Reference SNPs
+
+```{r}
+set="refSNPs"
+```
+
+## Projecting under current climate
+
+### GDM
+
+#### Projecting geo & env variables
+
+```{r ProjGDMEnvGeoRefSNPs,cache=TRUE, fig.height=8, fig.width=8}
+# Load the model
+gdm.AvgWater <- readRDS(file=paste0("outputs/GDM/models/GDMAvgWater_",set,".rds"))
+
+# Create a raster of the genetic importance of each environmental and geographical variable
+rastTrans <- gdm.transform(gdm.AvgWater, stackCurrClimRes30sec) 
+
+# Extract the values from the raster
+rastDat <- na.omit(getValues(rastTrans))
+
+# Principal Components Analysis (PCA) to reduce the transformed environmental variables into three factors
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE)
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1 
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackCurrClimRes30sec[[1]]
+
+rasValue <- raster::extract(stackCurrClimRes30sec, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 15
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+#### Projecting only env variables
+
+```{r ProjGDMEnvRefSNPs,cache=TRUE, fig.height=8, fig.width=8}
+# Load the model
+gdm.AvgWater <- readRDS(file=paste0("outputs/GDM/models/GDMAvgWater_",set,".rds"))
+
+# Create a raster of the genetic importance of each environmental and geographical variable
+rastTrans <- gdm.transform(gdm.AvgWater, stackCurrClimRes30sec) 
+
+# Extract the values from the raster
+rastDat <- na.omit(getValues(rastTrans))
+
+# We may want to keep only the environmental variables, in this case, run the following line:
+rastDat <- rastDat[,3:ncol(rastDat)]
+
+# Principal Components Analysis (PCA) to reduce the transformed environmental variables into three factors
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE)
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1 
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackCurrClimRes30sec[[1]]
+
+rasValue <- raster::extract(stackCurrClimRes30sec, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+
+## Projecting under future climate 
+
+> scenario SSP370
+
+### GDM
+
+#### Projecting geo & env variables
+
+```{r ProjGDMEnvGeoGCMsSSP370,fig.height=6,fig.width=6}
+rastTrans <- gdm.transform(gdm.AvgWater, ssp370stackavg)
+rastDat <-  na.omit(getValues(rastTrans))
+rastDat <- as.data.frame(rastDat)
+
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE) # bio12 does not appear as this variable has no explanatory power
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- ssp370stackavg[[1]]
+
+rasValue <- raster::extract(ssp370stackavg, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+
+
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+#### Projecting only env variables
+
+```{r ProjGDMEnvGCMsSSP370,fig.height=6,fig.width=6}
+rastTrans <- gdm.transform(gdm.AvgWater, ssp370stackavg)
+rastDat <-  na.omit(getValues(rastTrans))
+rastDat <- as.data.frame(rastDat)
+
+# We may want to keep only the environmental variables, in this case, run the following line:
+rastDat <- rastDat[,3:ncol(rastDat)]
+
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE) # bio12 does not appear as this variable has no explanatory power
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- ssp370stackavg[[1]]
+
+rasValue <- raster::extract(ssp370stackavg, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+
+
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+# Common candidates
+
+```{r}
+set="CommonCandidates"
+```
+
+## Projecting under current climate
+
+### GDM
+
+#### Projecting geo & env variables
+
+```{r ProjGDMEnvGeoComCandSNPs,cache=TRUE, fig.height=8, fig.width=8}
+# Load the model
+gdm.AvgWater <- readRDS(file=paste0("outputs/GDM/models/GDMAvgWater_",set,".rds"))
+
+# Create a raster of the genetic importance of each environmental and geographical variable
+rastTrans <- gdm.transform(gdm.AvgWater, stackCurrClimRes30sec) 
+
+# Extract the values from the raster
+rastDat <- na.omit(getValues(rastTrans))
+
+# Principal Components Analysis (PCA) to reduce the transformed environmental variables into three factors
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE)
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1 
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackCurrClimRes30sec[[1]]
+
+rasValue <- raster::extract(stackCurrClimRes30sec, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 15
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+#### Projecting only env variables
+
+```{r ProjGDMEnvComCandSNPs,cache=TRUE, fig.height=8, fig.width=8}
+# Load the model
+gdm.AvgWater <- readRDS(file=paste0("outputs/GDM/models/GDMAvgWater_",set,".rds"))
+
+# Create a raster of the genetic importance of each environmental and geographical variable
+rastTrans <- gdm.transform(gdm.AvgWater, stackCurrClimRes30sec) 
+
+# Extract the values from the raster
+rastDat <- na.omit(getValues(rastTrans))
+
+# We may want to keep only the environmental variables, in this case, run the following line:
+rastDat <- rastDat[,3:ncol(rastDat)]
+
+# Principal Components Analysis (PCA) to reduce the transformed environmental variables into three factors
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE)
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1 
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- stackCurrClimRes30sec[[1]]
+
+rasValue <- raster::extract(stackCurrClimRes30sec, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+
+
+## Projecting under future climate 
+
+> scenario SSP370
+
+### GDM
+
+#### Projecting geo & env variables
+
+```{r ProjGDMEnvGeoGCMsSSP370ComCand,fig.height=6,fig.width=6}
+rastTrans <- gdm.transform(gdm.AvgWater, ssp370stackavg)
+rastDat <-  na.omit(getValues(rastTrans))
+rastDat <- as.data.frame(rastDat)
+
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE) # bio12 does not appear as this variable has no explanatory power
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- ssp370stackavg[[1]]
+
+rasValue <- raster::extract(ssp370stackavg, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+
+
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+#### Projecting only env variables
+
+```{r ProjGDMEnvGCMsSSP370ComCand,fig.height=6,fig.width=6}
+rastTrans <- gdm.transform(gdm.AvgWater, ssp370stackavg)
+rastDat <-  na.omit(getValues(rastTrans))
+rastDat <- as.data.frame(rastDat)
+
+# We may want to keep only the environmental variables, in this case, run the following line:
+rastDat <- rastDat[,3:ncol(rastDat)]
+
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE) # bio12 does not appear as this variable has no explanatory power
+
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- ssp370stackavg[[1]]
+
+rasValue <- raster::extract(ssp370stackavg, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+
+
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+```
+
+
+## Genomic offset
+
+```{r SetSameNumberOfRowsRasters}
+cellval.ssp370stack <- na.omit(as.data.frame(raster::extract(ssp370stack[[1]][[1]], PinpinDistri,cellnumbers=T)))
+cellval.stackCurrClimRes25min <- na.omit(as.data.frame(raster::extract(stackCurrClimRes25min[[1]], PinpinDistri,cellnumbers=T)))
+
+# 2 cells to replace by NAs in ssp370stack
+cellval.ssp370stack[cellval.ssp370stack$cell %in% setdiff(cellval.ssp370stack$cell,cellval.stackCurrClimRes25min$cell),]
+cell1  <- cellval.ssp370stack$cell[cellval.ssp370stack$cell %in% setdiff(cellval.ssp370stack$cell,cellval.stackCurrClimRes25min$cell)]
+
+# 6 cells to replace by NAs in stackCurrClimRes25min
+cellval.stackCurrClimRes25min[cellval.stackCurrClimRes25min$cell %in% setdiff(cellval.stackCurrClimRes25min$cell,cellval.ssp370stack$cell),]
+cell2 <- cellval.stackCurrClimRes25min$cell[cellval.stackCurrClimRes25min$cell %in% setdiff(cellval.stackCurrClimRes25min$cell,cellval.ssp370stack$cell)]
+
+replaceNA <- function(x) {for(i in 1:7)  {
+  x[[i]][c(cell1)] <- NA
+  return(x)}}
+
+ssp370stack <- lapply(ssp370stack,replaceNA)
+for(i in 1:7)  {stackCurrClimRes25min[[i]][c(cell2)] <- NA}
+```
+
+
+### GDM
+
+
+```{r GOSSP370GDM, cache=TRUE, fig.height=3,fig.width=4.5}
+GOAcrossRangeWithGDM <- function(x){
+  
+  rast.pred <- predict.gdm(gdm.AvgWater, stackCurrClimRes25min,time=TRUE, predRasts=x) 
+  rasValue <- raster::extract(rast.pred, PinpinDistri,cellnumbers=T)
+  rasValue <- as.data.frame(rasValue)
+  rasValue <- na.omit(rasValue)
+  return(rasValue$value)
+
+} 
+
+genOffallGCMs <- lapply(ssp370stack, GOAcrossRangeWithGDM)
+names(genOffallGCMs) <- str_sub(ssp370stack.names,15,-5)
+
+# convert to DF 
+dfGOallGCMs <- as.data.frame(genOffallGCMs)
+
+# Distribution of the genomic offset for each GCM
+dfGOallGCMs %>%  
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+
+dfGOallGCMs$mean <- apply(dfGOallGCMs,1,mean)
+dfGOallGCMs$sd <- apply(dfGOallGCMs,1,sd)
+dfGOallGCMs$sdSup <- dfGOallGCMs$mean + dfGOallGCMs$sd
+dfGOallGCMs$sdInf <- dfGOallGCMs$mean - dfGOallGCMs$sd
+dfGOallGCMs$seSup <- dfGOallGCMs$mean + dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+dfGOallGCMs$seInf <- dfGOallGCMs$mean - dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+
+
+# Distribution of mean GO and its SE
+dfGOallGCMs %>%  
+  dplyr::select(mean,seSup,seInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Distribution of mean GO and SD Supp and Inf
+dfGOallGCMs %>%  
+  dplyr::select(mean,sdSup,sdInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Keeping mean and SD for futher analyses
+#DFtotssp585 <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanBS=mean,SdBS=sd)
+```
+
+```{r PlotGOSSP370GDM,fig.height=8,fig.width=8}
+rast.go <- ssp370stack[[1]][[1]] 
+rasValue <- raster::extract(rast.go, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+rast.go[rasValue$cell] <- dfGOallGCMs$mean
+# plot(rast.go,box = FALSE,
+#      axes = FALSE,
+#      alpha=0.8,
+#       col=colorRampPalette(c("blue","yellow","red"))(255),
+#      zlim=c(0,0.1))
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plot(rast.go,box = FALSE,
+     axes = FALSE,
+     #alpha=0.8,
+      col=colorRampPalette(c("blue","yellow","red"))(255),
+     #zlim=c(0,0.1),
+     add=T,
+     bgalpha=0)
+```
+
+Extract the Values of genomic offset for the NFI plots. 
+
+```{r ExtractGOforNFIplotsGDM}
+NFIdata <- readRDS(file="data/IFN/alexdata/dfplotPINPINA0.8R.M.rds") %>% 
+  dplyr::select(plotcode,longitude,latitude,treeNbrJ.IMall) %>% 
+  dplyr::rename(NbTot=treeNbrJ.IMall)
+NFIdata <- NFIdata[!(NFIdata$NbTot==0),]
+NFIdata$GO <- raster::extract(rast.go,NFIdata[,c("longitude","latitude")])
+
+head(NFIdata) %>% 
+  kable() %>%  
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F)
+
+saveRDS(NFIdata,file="outputs/GDM/GO/nfiGO.rds")
+```
+
+
+`r knitr::opts_chunk$set(eval = F)`

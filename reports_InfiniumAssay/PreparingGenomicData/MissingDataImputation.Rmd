@@ -1,0 +1,183 @@
+---
+title: "Missing data imputation"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)
+library(tidyverse)
+library(kableExtra)
+```
+
+# Load the genomic dataset
+
+The genomic dataset contains **523 genotypes and 5,165 SNPs**.
+
+```{r LoadGenotypeData}
+# File with the genotype names (clone names)
+geno_names <- read.delim2("data/ClonapinBlups523IndPiMASSJuly2019.txt", row.names=1)
+
+# File with the genotype of each clone for each SNP
+geno <- read.csv("data/5165snps523genotypesNA.txt", header=FALSE, row.names=1)
+
+# Removing the first two columns with allele info (A,T, G or C)
+geno <- geno[,3:dim(geno)[[2]]]
+
+# Give the genotype name for each column of geno
+colnames(geno) <- rownames(geno_names)
+
+# Genotypes in rows, SNPs in columns
+geno <- as.data.frame(t(geno))
+
+geno[1:10,1:10]%>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+```{r NAs}
+sum(is.na(geno)) # 17,263 missing values;  17263/(5165*523) = 0.006390639 => ~ 6% missing values
+```
+
+There are 17,263 missing values (~6% of missing values). 
+
+Two ways to impute the missing values:
+
+- **1.** Method from the RDA [vignette](https://popgen.nescent.org/2018-03-27_RDA_GEA.html) but that we are not going to use here. We can impute the missing values using the most common allele at each SNP across all individuals.
+
+- **2.** Method that we are going to use: **Imputation of the missing values using the most common allele at each SNP within the gene pool**. So here, the genotypes are classified according to the main gene pool the belong to (although we aknowledge that some genotypes are admixed and belong to different gene pools).
+
+According to the RDA [vignette](https://popgen.nescent.org/2018-03-27_RDA_GEA.html), other imputation methods are possible: <span style="color: gray;">"We could also use this imputation approach within ecotypes (rather than across all individuals). Other promising imputation methods for species lacking a reference genome include: using ancestry values from `snmf` in the `LEA` package (Frichot & Francois 2015), using Random Forest (implemented for genomic data in the R package `grur`, Gosselin 2017), and the program LinkImpute (Money et al., 2015)."</span>
+
+
+# Load the genotype proportion of ancestry
+
+We load the dataset where there is the proportion of belonging of each genotype to a given gene pool. 
+
+```{r PropBelonging}
+env <- readRDS(file="data/AllDataPhenoClimSoil.RDS") %>% 
+  select(clon,prov,paste0(rep("Q",6),1:6),max.Q) %>%  
+  rename(genotype=clon) %>% 
+  unique() %>% 
+  drop_na()
+```
+
+# Imputation
+
+```{r NAsImputation}
+# First method
+##############
+# using the most common allele at each SNP across all individuals.
+# gen.imp <- apply(geno, 2, function(x) replace(x, is.na(x), as.numeric(names(which.max(table(x))))))
+# sum(is.na(gen.imp)) # No NAs
+
+# Second method
+################
+# using the most common genotype at each SNP within the main gene pool this genotype belong to.
+
+mainGP <- env %>% select(genotype,max.Q) # extract the main gene pool from the env dataset.
+gen.imp <- geno %>% rownames_to_column("genotype") %>%  
+  left_join(mainGP,by="genotype") %>% select(genotype,max.Q,everything())
+
+gen.imp[1:10,1:10] %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+
+
+############################################################################################
+# Checks that it works fine
+  # Find some SNPs with NAs
+subset <- gen.imp[gen.imp$max.Q=="Q5",]
+# sample(colnames(subset)[colSums(is.na(subset)) > 0],3,replace=F) extract some SNPs with NAs
+sum(is.na(subset)) # 2,153 NAs in Q5 gene pool
+
+table(subset[,"SNP_3692"]) # NAs of this SNP should take the value '0' after imputation.
+table(subset[,"SNP_4696"]) # The missing value of this SNP should take the value '1' after imputation.
+table(subset[,"SNP_5582"]) # The missing value of this SNP should take the value '0' after imputation.
+
+
+############################################################################################
+# Replace NAs by (1) subseting by GP, (2) imputing NAs, (3) reassembling the GP.
+for(i in unique(gen.imp$max.Q)){
+  subset <- gen.imp[gen.imp$max.Q==i,]
+  subset <- apply(subset[,3:ncol(subset)], 2, function(x) replace(x, is.na(x), as.numeric(names(which.max(table(x))))))
+  gen.imp[gen.imp$max.Q==i,3:ncol(gen.imp)] <- subset
+}
+
+############################################################################################
+# Checks that it works fine
+  # Look at the SNPs that had NAs before imputation
+subset <- gen.imp[gen.imp$max.Q=="Q5",]
+sum(is.na(subset)) # 0 NAs now!
+
+table(subset[,"SNP_3692"]) # great! (NAs of this SNP has taken the values '0' after imputation)
+table(subset[,"SNP_4696"]) # great! (The missing value of this SNP has taken the value '1' after imputation)
+table(subset[,"SNP_5582"]) # great! (The missing value of this SNP has taken the value '0' after imputation)
+
+rownames(gen.imp) <- gen.imp$genotype
+gen.imp <- gen.imp %>% dplyr::select(-genotype,-max.Q)
+```
+
+
+We have to check that the genotypes are in the same order in `env` and `gen.imp` datasets.
+
+```{r Order}
+identical(rownames(gen.imp), env[,1]) # That's ok!
+```
+ 
+# Saving the dataset
+
+We save this dataset to use it in the univariate genotype-environment association analysis with <span style="font-variant:small-caps;">BayPass</span>:
+
+```{r SaveGenImp}
+saveRDS(gen.imp,file="data/GenomicData/5165snps523genotypesImpNA.rds")
+```
+
+

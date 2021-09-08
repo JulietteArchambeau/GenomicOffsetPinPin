@@ -1,5 +1,5 @@
 ---
-title: "Spatial predictions of the current genetic composition"
+title: "Estimating the genetic-environment relationship using the whole genomic dataset"
 author: "Juliette Archambeau"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
@@ -11,6 +11,8 @@ output:
        collapsed: false
     number_sections: true
     highlight: textmate
+editor_options: 
+  chunk_output_type: console
 ---
 
 <style>
@@ -78,7 +80,7 @@ library(adespatial) # to calculate the Moran eigen vectors
 <!-- Functions & Options used -->
 
 ```{r FuntionsOptionsUsed,echo=F}
-source("../../scripts/Functions/corpmat.R")
+source("scripts/Functions/corpmat.R")
 col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
 
 # Gray scale
@@ -112,7 +114,9 @@ ggbiplot(pca,varname.size =4) +  ylim(-2.5, 2.5) +    xlim(-3, 3) +
 }
 ```
 
-# Variable selection
+# DATA
+
+## Variable selection
 
 
 The variables were extracted from the EuMedClim database.
@@ -126,14 +130,14 @@ Criteria to include the variables:
 
 
 ```{r LoadEnvData}
-data <- readRDS(file="../../data/AllDataPhenoClimSoil.RDS")
+data <- readRDS(file="data/AllDataPhenoClimSoil.RDS")
 data <- data %>% select(prov,contains("ude_prov"),contains("bio"),contains("top_prov"),"depth_roots_prov")
 colnames(data) <- c("prov",str_sub(colnames(data)[-1],1,-6))
 data <- unique(data)
 data <- data[!(data$prov=="ROD"),]
 data
 
-topo <- readRDS(file="../../data/Topography/DfTopoVarbyProv.rds")
+topo <- readRDS(file="data/Topography/DfTopoVarbyProv.rds")
 topo <- topo %>% dplyr::select(prov,TRI_WGS84_90m_R) %>% 
                  dplyr::rename(TRI=TRI_WGS84_90m_R)
 data <- merge(data,topo,by="prov")
@@ -160,7 +164,7 @@ ggbiplot(pca,varname.size =4) +  ylim(-4.5, 2.5) +    xlim(-3, 3) +
 ```
 
 
-## Set AvgSand
+### Set AvgSand
 
 Topographic variable: `TRI`.
 
@@ -169,7 +173,7 @@ Soil variables:
   - `sand_top` = sand content in the top layers of the soil
   - `depth_roots` = Depth available to roots
 
-Climatic variables representing episodic events:
+Climatic variables representing average climatic conditions:
 
   - `bio1`: annual daily mean temperature (°C)
   - `bio2`: mean diurnal temperature range (max-min, °C)
@@ -183,7 +187,7 @@ PlotCors(data,select.var = c(select.var.AvgSand,"latitude","longitude"))
 ```
 
 
-## Set AvgWater
+### Set AvgWater
 
 Topographic variable: `TRI`.
 
@@ -192,7 +196,7 @@ Soil variables:
   - `water_top` = Total available water content
   - `depth_roots` = Depth available to roots
 
-Climatic variables representing episodic events:
+Climatic variables representing average climatic conditions:
 
   - `bio1`: annual daily mean temperature (°C)
   - `bio2`: mean diurnal temperature range (max-min, °C)
@@ -205,7 +209,7 @@ select.var.AvgWater <- c("bio1","bio2","bio12","bio14","water_top","depth_roots"
 PlotCors(data,select.var = c(select.var.AvgWater,"latitude","longitude"))
 ```
 
-## Set ExtSand
+### Set ExtSand
 
 Topographic variable: `TRI`.
 
@@ -228,7 +232,7 @@ PlotCors(data,select.var = c(select.var.ExtSand,"latitude","longitude"))
 ```
 
 
-## Set ExtWater
+### Set ExtWater
 
 Topographic variable: `TRI`.
 
@@ -250,6 +254,92 @@ select.var.ExtWater <- c("bio13","bio14","bio5","bio6","water_top","depth_roots"
 PlotCors(data,select.var = c(select.var.ExtWater,"latitude","longitude"))
 ```
 
+## Maritime pine distribution (mask)
+
+We load the shapefile of the maritime pin distribution that comes from EUFORGEN and that we will use as a mask in the maps.
+
+```{r LoadMaritimePineDistriMask}
+PinpinDistri  <- shapefile('data/maps/MaskPinpinDistri/PinpinDistri.shp')
+```
+
+## Hillshade (background)
+
+We load the hillshade background.
+
+```{r LoadBackground}
+background <- raster("data/maps/Hillshade/background.grd")
+```
+
+## Rasters of current climatic, soil and topographic variables
+
+> Resolution ~ 1 km2 (30arc sec)
+
+(0.93 x 0.93 = 0.86 km2 at the equator)
+
+```{r LoadStackAvgWater}
+stackall <- stack("data/StacksEnvVars/StackAvgWater.grd")
+```
+
+> Resolution ~ 30.869 km2 (2.5 minutes)
+
+(5.556 x 5.556 at the equator)
+
+```{r LoadStackAvgWaterLowRes}
+stackall.lowres <- stack("data/StacksEnvVars/CurStacksResWorldClim/StackAvgWaterResWorldClim.grd")
+```
+
+## Rasters of future climatic, soil and topographic variables
+
+```{r LoadFutureStackAvgWater}
+# scenarion SSP370
+path="data/StacksEnvVars/FutClimStacks/2041to2060/SSP370/"
+ssp370stack.names <- list.files(path=path,pattern="^StackAvgWater.*grd$")
+ssp370stack <- lapply(ssp370stack.names, function(t) stack(paste0(path,t)))
+
+# scenarion SSP585
+path="data/StacksEnvVars/FutClimStacks/2041to2060/SSP585/"
+ssp585stack.names <- list.files(path=path,pattern="^StackAvgWater.*grd$")
+ssp585stack <- lapply(ssp585stack.names, function(t) stack(paste0(path,t)))
+```
+
+## Distance-based Moran Eigen vectors
+
+
+
+```{r CalculateMoranEigenVectors, eval=F}
+# Extract the values in the buffer corresponding to the maritime pine distribution
+# The values are extracted from the environmental rasters at low resolution (~31km² resolution) because the computer can't provide enough memory to calculate the moran eigenvectors at high resolution. 
+rasValue <- raster::extract(stackall.lowres, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue) # 12982 values
+#rasValue <- na.omit(rasValue) # no need to run this line as there is no NAs
+
+###
+# At ~1km² resolution: not possible because of memory space:
+# Error message: "Erreur : impossible d'allouer un vecteur de taille 391.6 Go" when trying to calculate the MEM for all values
+###
+
+
+# We join the cell number with the x=longitude and y=latitude
+ex.df.coords <- cbind(xyFromCell(stackall.lowres,rasValue[,1]),rasValue)
+
+# And we add the 34 provenances!
+ex.df.coords <- ex.df.coords %>% rename(latitude=y,longitude=x)  %>% select(latitude,longitude) %>% 
+  rbind(data[,c("latitude","longitude")])
+
+# Here we calculate the distance-based Moran eigen vectors:
+moraneigenvectors <- ex.df.coords %>% dbmem
+# There are 3,708 eigenfunctions with positive eigenvalues!
+
+# Save all the MEMs
+saveRDS(moraneigenvectors,file="outputs/GF/moraneigenvectors/moraneignevectorsAllDim.rds")
+
+# Save the MEMs of the provenances only and 4 dimensions only. 34 values.
+saveRDS(moraneigenvectors[(13016-33):13016,1:4],file="outputs/GF/moraneigenvectors/moraneignevectorsProvs.rds")
+
+# Save the MEMs of the cells in the buffer (maritime pine distribution). 12982 values.
+saveRDS(moraneigenvectors[0:(13016-34),1:4],file="outputs/GF/moraneigenvectors/moraneignevectorsPinpinDistri.rds")
+```
+
 
 # Fitting the models
 
@@ -264,7 +354,7 @@ perf <- data.frame(Set=c("AvgSand","AvgWater","ExtSand","ExtWater"),ExpDev=NA,CV
 > Load the Fst matrix
 
 ```{r LoadFstMatrix}
-fstmat <- readRDS(file="../../data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34ProvsBS.rds")
+fstmat <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_noNeg.rds")
 fstmat <- as.data.frame(fstmat) 
 fstmat <- fstmat %>%  tibble::rownames_to_column("prov") # The distance matrix must have as the first column the names of the provenances
 mean(unlist(fstmat[,-1]),na.rm=T)
@@ -697,23 +787,24 @@ plot(gdm.ExtWater.splineDat[[1]][,"TRI"],
      ylim=c(0,0.2))
 ```
 
-
-
 ## GF analysis
 
 > Calculate the Moran's eigenvectors
 
-```{r MoranEigenVectors}
-mem <- data %>% select(latitude,longitude) %>% dbmem
 
-# Merge coordinates and MEM
+From Fitzpatrick & Keller: "For GF, which cannot directly accommodate spatial effects, we attempted to account for the influence of spatial processes and unmeasured environmental variation using **Moran’s eigenvector map** (MEM) variables (Borcard & Legendre 2002; Dray et al. 2006). Briefly, MEM variables are the **eigenvectors of a spatial weighting matrix derived from the geographic coordinates of sampling locations**. The resulting **uncorrelated** spatial eigenfunctions can be used to model geographic structure in genetic patterns across a range of spatial scales. Following previous applications, we used the **first half of the MEM eigenfunctions with positive eigenvalues** (four in our case), which have been claimed to model broad-scale spatial genetic variation generated by processes such as demographic history and, more likely, unaccounted for environmental variation (Manel et al. 2010b, 2012; Sork et al. 2013). This approach has analogies to the use of latent factors to account for unobserved sources of genetic variation when testing gene–environment associations (Frichot et al. 2013), and given that MEMs may actually reflect unmeasured environmental patterns rather than true isolation-by-distance, they should be implemented and interpreted with caution."
+
+In our case, there are four MEM eigenfunctions with positive eigenvalues, we selected the four. 
+
+```{r MoranEigenVectors}
+mem <- readRDS(file="outputs/GF/moraneigenvectors/moraneignevectorsProvs.rds")
 mem <- bind_cols(data[,c("prov","latitude","longitude")],mem)
 mem
 ```
 
 
 ```{r LoadGenoPrepared}
-geno <- readRDS(file="../../data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.rds")
+geno <- readRDS(file="data/PreparedDFforGDMandGF/GF/GenoDataWithFrequencies.rds")
 ```
 
 Removing the SNPs that are polymorphic in more than 5 populations.
@@ -752,12 +843,12 @@ Fit the GF model:
 gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
                         response.vars=colnames(SNPs), ntree=500, 
                         maxLevel=maxLevel, trace=T, corr.threshold=0.50)
-saveRDS(gf,file=paste0("../../outputs/GF/models/GFAvgSand.rds")) 
+saveRDS(gf,file=paste0("outputs/GF/models/GFAvgSand.rds")) 
 ```
 
 
 ```{r LoadModelAvgSand,cache=TRUE}
-gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgSand.rds"))
+gf <- readRDS(file=paste0("outputs/GF/models/GFAvgSand.rds"))
 ```
 
 
@@ -814,7 +905,7 @@ mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
 
 
 
-### Set AvgWater
+### Set AvgWater MEM
 
 
 ```{r FormatDataGFAvgWater}
@@ -839,60 +930,60 @@ Fit the GF model:
 gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
                         response.vars=colnames(SNPs), ntree=500, 
                         maxLevel=maxLevel, trace=T, corr.threshold=0.50)
-saveRDS(gf,file=paste0("../../outputs/GF/models/GFAvgWater.rds")) 
+saveRDS(gf,file=paste0("outputs/GF/models/GFAvgWater.rds")) 
 ```
 
 
 ```{r LoadModelAvgWater,cache=TRUE}
-gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgWater.rds"))
+gf.mem <- readRDS(file=paste0("outputs/GF/models/GFAvgWater.rds"))
 ```
 
 
 ```{r PlotOverallImptanceGFAvgWater,cache=TRUE, fig.height=4,fig.width=8}
-plot(gf, plot.type="Overall.Importance")
-mean(gf$result)
-sd(gf$result)
+plot(gf.mem, plot.type="Overall.Importance")
+mean(gf.mem$result)
+sd(gf.mem$result)
 ```
 
 ```{r PlotCumulativeImptanceGFAvgWater,cache=TRUE,fig.height=4,fig.width=4}
 # Annual daily mean T° (C°)
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.mem, plot.type="Cumulative.Importance",
      imp.vars="bio1",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Annual daily mean T° (C°)", font=2,cex=0.8)
 
 # Mean diurnal T° range (max-min, °C)
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.mem, plot.type="Cumulative.Importance",
      imp.vars="bio2",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Mean diurnal T° range (max-min, °C)", font=2,cex=0.8)
 
 # Annual precipitation (mm)
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.mem, plot.type="Cumulative.Importance",
      imp.vars="bio12",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8)
 
 # Precipitation of the driest month (mm)
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.mem, plot.type="Cumulative.Importance",
      imp.vars="bio14",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
 
 # Water content
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.mem, plot.type="Cumulative.Importance",
      imp.vars="water_top",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Water content in the top layers (%)", font=2,cex=0.8)
 
 # Depth available to roots
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.mem, plot.type="Cumulative.Importance",
      imp.vars="depth_roots",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
 
 # TRI
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.mem, plot.type="Cumulative.Importance",
      imp.vars="TRI",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
@@ -925,12 +1016,12 @@ Fit the GF model:
 gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
                         response.vars=colnames(SNPs), ntree=500, 
                         maxLevel=maxLevel, trace=T, corr.threshold=0.50)
-saveRDS(gf,file=paste0("../../outputs/GF/models/GFExtSand.rds")) 
+saveRDS(gf,file=paste0("outputs/GF/models/GFExtSand.rds")) 
 ```
 
 
 ```{r LoadModelExtSand,cache=TRUE}
-gf <- readRDS(file=paste0("../../outputs/GF/models/GFExtSand.rds"))
+gf <- readRDS(file=paste0("outputs/GF/models/GFExtSand.rds"))
 ```
 
 
@@ -1011,12 +1102,12 @@ Fit the GF model:
 gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
                         response.vars=colnames(SNPs), ntree=500, 
                         maxLevel=maxLevel, trace=T, corr.threshold=0.50)
-saveRDS(gf,file=paste0("../../outputs/GF/models/GFExtWater.rds")) 
+saveRDS(gf,file=paste0("outputs/GF/models/GFExtWater.rds")) 
 ```
 
 
 ```{r LoadModelExtWater,cache=TRUE}
-gf <- readRDS(file=paste0("../../outputs/GF/models/GFExtWater.rds"))
+gf <- readRDS(file=paste0("outputs/GF/models/GFExtWater.rds"))
 ```
 
 
@@ -1070,8 +1161,12 @@ plot(gf, plot.type="Cumulative.Importance",
 mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
 ```
 
+```{r savespace, echo=F}
+rm(gf)
+```
 
-### Test with lat/long
+
+### Set AvgWater lat/long
 
 As I can't include in the projection the moran eigen vectors, I'm trying to include the latitude and longitude instead of the Moran eigen vectors.
 
@@ -1096,72 +1191,72 @@ Fit the GF model:
 gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
                         response.vars=colnames(SNPs), ntree=500, 
                         maxLevel=maxLevel, trace=T, corr.threshold=0.50)
-saveRDS(gf,file=paste0("../../outputs/GF/models/GFAvgWaterGeo.rds")) 
+saveRDS(gf,file=paste0("outputs/GF/models/GFAvgWaterGeo.rds")) 
 ```
 
 
 ```{r LoadModelAvgWaterGeo}
-gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgWaterGeo.rds"))
+gf.geo <- readRDS(file=paste0("outputs/GF/models/GFAvgWaterGeo.rds"))
 ```
 
 
 ```{r PlotOverallImptanceGFAvgWaterGeo,cache=TRUE, fig.height=4,fig.width=8}
-plot(gf, plot.type="Overall.Importance")
-mean(gf$result)
-sd(gf$result)
+plot(gf.geo, plot.type="Overall.Importance")
+mean(gf.geo$result)
+sd(gf.geo$result)
 ```
 
 ```{r PlotCumulativeImptanceGFAvgWaterGeo,cache=TRUE,fig.height=4,fig.width=4}
 # Latitude
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.geo, plot.type="Cumulative.Importance",
      imp.vars="latitude",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Latitude", font=2,cex=0.8)
 
 # Longitude
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.geo, plot.type="Cumulative.Importance",
      imp.vars="longitude",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Longitude", font=2,cex=0.8)
 
 # Annual daily mean T° (C°)
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.geo, plot.type="Cumulative.Importance",
      imp.vars="bio1",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Annual daily mean T° (C°)", font=2,cex=0.8)
 
 # Mean diurnal T° range (max-min, °C)
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.geo, plot.type="Cumulative.Importance",
      imp.vars="bio2",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Mean diurnal T° range (max-min, °C)", font=2,cex=0.8)
 
 # Annual precipitation (mm)
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.geo, plot.type="Cumulative.Importance",
      imp.vars="bio12",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8)
 
 # Precipitation of the driest month (mm)
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.geo, plot.type="Cumulative.Importance",
      imp.vars="bio14",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
 
 # Water content
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.geo, plot.type="Cumulative.Importance",
      imp.vars="water_top",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Water content in the top layers (%)", font=2,cex=0.8)
 
 # Depth available to roots
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.geo, plot.type="Cumulative.Importance",
      imp.vars="depth_roots",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
 
 # TRI
-plot(gf, plot.type="Cumulative.Importance",
+plot(gf.geo, plot.type="Cumulative.Importance",
      imp.vars="TRI",
      plot.args=list(show.species=FALSE,show.overall=TRUE))
 mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
@@ -1172,65 +1267,6 @@ mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
 # Projecting across the species range
 
 Projections are done with the best set of variables (`AvgWter`): `TRI`, `water_top`, `depth_roots`, `bio1`, `bio2`, `bio12` and `bio14`.
-
-## Load data 
-
-### Maritime pine distribution (mask)
-
-```{r MaritimePineDistriMask}
-# Maritime pine distribution from EUFORGEN (shapefile)
-PinpinDistri  <- shapefile('../../../../Pinpin_Clonapin/maps/pinus_pinaster_distribution/Pinus_pinaster_EUFORGEN.shp')
-
-# As I haven't downloaded SRTM data for north-eastern Morocco, I'm going to remove the polygons in this region.
-b <- as(extent(5, 10, 33,37.5), 'SpatialPolygons')
-crs(b) <- crs(PinpinDistri)
-PinpinDistri <- gDifference(PinpinDistri,b)
-plot(PinpinDistri)
-```
-
-### Hillshade (background)
-
-```{r MapBackground,cache=TRUE}
-# fond de carte
-# https://land.copernicus.eu/imagery-in-situ/eu-dem/eu-dem-v1-0-and-derived-products/slope?tab=download
-# Need to create an account
-
-# I took the hillsahede map from here:
-# https://www.eea.europa.eu/data-and-maps/data/digital-elevation-model-of-europe
-
-background <- raster("../../data/maps/EuropeanData/hillshade1x1.tif")
-background <- projectRaster(background, crs="+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
-e <- extent(-10, 14, 31, 50)
-background <- crop(background, e)
-```
-
-### Rasters of current climatic, soil and topographic variables
-
-> Resolution ~ 1 * 1 km (30arc sec)
-
-```{r LoadStackAvgWater}
-stackall <- stack("../../data/StacksEnvVars/StackAvgWater.grd")
-```
-
-> Resolution 2.5 minutes
-
-```{r LoadStackAvgWaterLowRes}
-stackall.lowres <- stack("../../data/StacksEnvVars/CurStacksResWorldClim/StackAvgWaterResWorldClim.grd")
-```
-
-### Rasters of future climatic, soil and topographic variables
-
-```{r LoadFutureStackAvgWater}
-# scenarion SSP370
-path="../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP370/"
-ssp370stack.names <- list.files(path=path,pattern="^StackAvgWater.*grd$")
-ssp370stack <- lapply(ssp370stack.names, function(t) stack(paste0(path,t)))
-
-# scenarion SSP585
-path="../../data/StacksEnvVars/FutClimStacks/2041to2060/SSP585/"
-ssp585stack.names <- list.files(path=path,pattern="^StackAvgWater.*grd$")
-ssp585stack <- lapply(ssp585stack.names, function(t) stack(paste0(path,t)))
-```
 
 
 
@@ -1311,32 +1347,41 @@ text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]),
 
 ### GF
 
-#### Set AvgWater
+#### Set AvgWater MEM
 
+Calculating the Moran eigen vectors on the rasters at ~1km² resolution was not possible on my laptop as I did not have enough memory. That's why we did the projections of the rasters at ~ 31km² (2.5 minutes spatial resolution). 
 
-```{r TransformingBeforeProjectionGFCurrentClimate,cache=TRUE}
-# Load model estimating on the AvgWater set of variables
-gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgWater.rds"))
-
-rasValue <- raster::extract(stackall, PinpinDistri,cellnumbers=T)
+```{r TransformingBeforeProjectionGFMEMCurrentClimate,cache=TRUE}
+rasValue <- raster::extract(stackall.lowres, PinpinDistri,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)
 rasValue <- na.omit(rasValue)
 
 ###
-# This method doesn't work: "Erreur : impossible d'allouer un vecteur de taille 391.6 Go" when trying to calculate the MEM for all values
-# ex.df.coords <- cbind(xyFromCell(stackall,rasValue[,1]),rasValue)
-# ex.df.coords <- ex.df.coords %>% rename(latitude=x,longitude=y)
-# moraneigenvectors <- ex.df.coords %>% select(latitude,longitude) %>% dbmem
+# At ~1km² resolution: not possible because of memory space:
+# Error message: "Erreur : impossible d'allouer un vecteur de taille 391.6 Go" when trying to calculate the MEM for all values
+
+# So we project at ~31km² resolution:
+#ex.df.coords <- cbind(xyFromCell(stackall.lowres,rasValue[,1]),rasValue)
+#ex.df.coords <- ex.df.coords %>% rename(latitude=x,longitude=y)
+#moraneigenvectors <- ex.df.coords %>% select(latitude,longitude) %>% dbmem
+#saveRDS(moraneigenvectors,file="outputs/GF/moraneigenvectors/moraneignevectors.rds")
+#saveRDS(moraneigenvectors[,1:4],file="outputs/GF/moraneigenvectors/moraneignevectors4Dim.rds")
+moraneigenvectors <- readRDS(file="outputs/GF/moraneigenvectors/moraneignevectorsPinpinDistri.rds")
+rasValue <- cbind(moraneigenvectors,rasValue)
 ###
 
 # transform env using gf models, see ?predict.gradientForest
-projCur <- predict(gf, rasValue[,-1]) # remove cell column before transforming
+projCur.mem <- predict(gf.mem, rasValue %>%  dplyr::select(-cell)) # remove cell column before transforming
 
 # ppcatoraster by hand
-pca <- prcomp(projCur, center=TRUE, scale.=FALSE)
+pca <- prcomp(projCur.mem, center=TRUE, scale.=FALSE)
 ```
 
-```{r ProjectionGFCurrentClimate, fig.height=8, fig.width=8}
+
+Comment about the `predict.gradientForest` function: adding or not the Moran eigen vectors in the function doesn't influence the biological importance of the other variables. Maybe it is more informative to not include the Moran eigen vectors here, as advised by Fitzpatrick and Keller. 
+
+
+```{r ProjectionGFMEMCurrentClimate, fig.height=8, fig.width=8}
 ##assigns to colors, edit as needed to maximize color contrast, etc.
 a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
 r <- a1+a2; g <- -a2; b <- a3+a2-a1
@@ -1347,7 +1392,7 @@ scalG <- (g-min(g))/(max(g)-min(g))*255
 scalB <- (b-min(b))/(max(b)-min(b))*255
 
 ##assigns color to raster
-rast1 <- rast2 <- rast3 <- stackall[[1]]
+rast1 <- rast2 <- rast3 <- stackall.lowres[[1]]
 mapCells <- rasValue$cell
 rast1[mapCells] <- scalR
 rast2[mapCells] <- scalG
@@ -1362,9 +1407,9 @@ plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
 
 > Biplot of the genetic space
 
-```{r BiplotGFCurrentClimate, echo=F,fig.height=6,fig.width=6, cache=T}
+```{r BiplotGFMEMCurrentClimate, echo=F,fig.height=6,fig.width=6, cache=T}
 nvs <- dim(pca$rotation)[1]
-vec <- names(gf$X)[5:10]
+vec <- names(gf.mem$X)
 lv <- length(vec)
 vind <- rownames(pca$rotation) %in% vec
 scal <- 20 # 40
@@ -1380,39 +1425,29 @@ text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]),
 
 
 # Show the provenances
+######################
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
 points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.2)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec)
-PredsProvs <- predict(gf)
+PredsProvs <- predict(gf.mem)
 PCprovs <- predict(pca, PredsProvs)
 points(PCprovs[, 1:2])
 
 
-# Show the alleles
-SpsWtd <- sweep(gf$Y, 2, apply(gf$Y, 2, min),  "-")
+# Show all the alleles
+######################
+SpsWtd <- sweep(gf.mem$Y, 2, apply(gf.mem$Y, 2, min),  "-")
 SpsWtdPCs <- (t(SpsWtd) %*% (PCprovs[, 1:2]))/colSums(SpsWtd)
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 3, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5) 
 points(SpsWtdPCs, pch = ".",cex=3,col="black") # col = alpha("black", 0.4)
 
+
+
 # Show some alleles
+###################
 snp <- "SNP_0008"
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
      main="x30")
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5)
 points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
 
 
@@ -1420,11 +1455,6 @@ snp <- "SNP_0109"
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
      main="x10")
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5)
 points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*10)
 
 
@@ -1432,22 +1462,15 @@ snp <- "SNP_6088"
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
      main="x30")
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5)
 points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
 ```
 
 
-#### Set test lat/long
+#### Set AvgWater lat/long
 
+Projection at ~1km2 spatial resolution.
 
-```{r TransformingBeforeProjectionGFCurrentClimateLatLong}
-# Load model estimating on the test lat/long set of variables
-gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgWaterGeo.rds"))
-
+```{r TransformingBeforeProjectionGFGEOCurrentClimateLatLong}
 rasValue <- raster::extract(stackall, PinpinDistri,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)
 rasValue <- na.omit(rasValue)
@@ -1458,13 +1481,13 @@ rasValue <- rasValue %>% rename(longitude=x,latitude=y)
 ###
 
 # transform env using gf models, see ?predict.gradientForest
-projCur <- predict(gf, rasValue[,-3]) # remove cell column before transforming
+projCur <- predict(gf.geo, rasValue[,-3]) # remove cell column before transforming
 
 # ppcatoraster by hand
 pca <- prcomp(projCur, center=TRUE, scale.=FALSE)
 ```
 
-```{r ProjectionGFCurrentClimateLatLong, fig.height=8, fig.width=8}
+```{r ProjectionGFGEOCurrentClimateLatLong, fig.height=8, fig.width=8}
 ##assigns to colors, edit as needed to maximize color contrast, etc.
 a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
 r <- a1+a2; g <- -a2; b <- a3+a2-a1
@@ -1489,9 +1512,9 @@ plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
 
 > Biplot of the genetic space
 
-```{r BiplotGFCurrentClimateLatLong, echo=F,fig.height=6,fig.width=6}
+```{r BiplotGFGEOCurrentClimateLatLong, echo=F,fig.height=6,fig.width=6}
 nvs <- dim(pca$rotation)[1]
-vec <- names(gf$X)
+vec <- names(gf.geo$X)
 lv <- length(vec)
 vind <- rownames(pca$rotation) %in% vec
 scal <- 10 # 40
@@ -1507,39 +1530,29 @@ text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]),
 
 
 # Show the provenances
+#######################
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
 points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.2)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec)
-PredsProvs <- predict(gf)
+PredsProvs <- predict(gf.geo)
 PCprovs <- predict(pca, PredsProvs)
 points(PCprovs[, 1:2])
 
 
-# Show the alleles
-SpsWtd <- sweep(gf$Y, 2, apply(gf$Y, 2, min),  "-")
+# Show all the alleles
+######################
+SpsWtd <- sweep(gf.geo$Y, 2, apply(gf.geo$Y, 2, min),  "-")
 SpsWtdPCs <- (t(SpsWtd) %*% (PCprovs[, 1:2]))/colSums(SpsWtd)
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 3, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5) 
 points(SpsWtdPCs, pch = ".",cex=3,col="black") # col = alpha("black", 0.4)
 
+
+
 # Show some alleles
+####################
 snp <- "SNP_0008"
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
      main="x30")
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5)
 points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
 
 
@@ -1547,11 +1560,6 @@ snp <- "SNP_0109"
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
      main="x10")
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5)
 points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*10)
 
 
@@ -1559,11 +1567,6 @@ snp <- "SNP_6088"
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
      main="x30")
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5)
 points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
 ```
 
@@ -1680,30 +1683,25 @@ text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]),
 
 ### GF
 
-#### Set test lat/long
+#### Set AvgWater MEM
 
 
-```{r TransformingBeforeProjectionGFFutureClimateSSP370LatLong}
-# Load model estimating on the test lat/long set of variables
-#gf <- readRDS(file=paste0("../../outputs/GF/models/GFAvgWaterGeo.rds"))
-
+```{r TransformingBeforeProjectionGFMEMFutureClimateSSP370AvgWaterMEM}
 rasValue <- raster::extract(ssp370stackavg, PinpinDistri,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)
+
+# moran eigen vectors
+rasValue <- cbind(moraneigenvectors,rasValue)
 rasValue <- na.omit(rasValue)
 
-###
-rasValue <- cbind(xyFromCell(ssp370stackavg,rasValue[,1]),rasValue)
-rasValue <- rasValue %>% rename(longitude=x,latitude=y)
-###
-head(rasValue)
 # transform env using gf models, see ?predict.gradientForest
-projCur <- predict(gf, rasValue[,-3]) # remove cell column before transforming
+projFut <- predict(gf.mem, rasValue %>%  dplyr::select(-cell)) # remove cell column before transforming
 
 # ppcatoraster by hand
-pca <- prcomp(projCur, center=TRUE, scale.=FALSE)
+pca <- prcomp(projFut, center=TRUE, scale.=FALSE) 
 ```
 
-```{r ProjectionGFFutureClimateSSP370LatLong, fig.height=8, fig.width=8}
+```{r ProjectionGFMEMFutureClimateSSP370LatLong, fig.height=8, fig.width=8}
 ##assigns to colors, edit as needed to maximize color contrast, etc.
 a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
 r <- a1+a2; g <- -a2; b <- a3+a2-a1
@@ -1728,12 +1726,12 @@ plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
 
 > Biplot of the genetic space
 
-```{r BiplotGFFutureClimateSSP370LatLong, echo=F,fig.height=6,fig.width=6}
+```{r BiplotGFMEMFutureClimateSSP370LatLong, echo=F,fig.height=6,fig.width=6}
 nvs <- dim(pca$rotation)[1]
-vec <- names(gf$X)
+vec <- names(gf.mem$X)
 lv <- length(vec)
 vind <- rownames(pca$rotation) %in% vec
-scal <- 10 # 40
+scal <- 20 # 40
 xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
 yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
 
@@ -1746,39 +1744,130 @@ text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]),
 
 
 # Show the provenances
+######################
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
 points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.2)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec)
-PredsProvs <- predict(gf)
+PredsProvs <- predict(gf.mem)
 PCprovs <- predict(pca, PredsProvs)
 points(PCprovs[, 1:2])
 
 
-# Show the alleles
-SpsWtd <- sweep(gf$Y, 2, apply(gf$Y, 2, min),  "-")
+# Show all the alleles
+#######################
+SpsWtd <- sweep(gf.mem$Y, 2, apply(gf.mem$Y, 2, min),  "-")
 SpsWtdPCs <- (t(SpsWtd) %*% (PCprovs[, 1:2]))/colSums(SpsWtd)
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 3, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5) 
 points(SpsWtdPCs, pch = ".",cex=3,col="black") # col = alpha("black", 0.4)
 
+
 # Show some alleles
+####################
 snp <- "SNP_0008"
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
      main="x30")
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5)
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+
+snp <- "SNP_0109"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x10")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*10)
+
+snp <- "SNP_6088"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
+```
+
+
+#### Set AvgWater lat/long
+
+
+```{r TransformingBeforeProjectionGFGEOFutureClimateSSP370LatLong}
+rasValue <- raster::extract(ssp370stackavg, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+###
+rasValue <- cbind(xyFromCell(ssp370stackavg,rasValue[,1]),rasValue)
+rasValue <- rasValue %>% rename(longitude=x,latitude=y)
+###
+
+# transform env using gf models, see ?predict.gradientForest
+projFut.geo <- predict(gf.geo, rasValue[,-3]) # remove cell column before transforming
+
+# ppcatoraster by hand
+pca <- prcomp(projFut.geo, center=TRUE, scale.=FALSE)
+```
+
+```{r ProjectionGFGEOFutureClimateSSP370LatLong, fig.height=8, fig.width=8}
+##assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1
+
+##scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+##assigns color to raster
+rast1 <- rast2 <- rast3 <- ssp370stackavg[[1]]
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+##stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+```
+
+> Biplot of the genetic space
+
+```{r BiplotGFGEOFutureClimateSSP370LatLong, echo=F,fig.height=6,fig.width=6}
+nvs <- dim(pca$rotation)[1]
+vec <- names(gf.geo$X)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 20 # 40
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+
+
+# Show the provenances
+######################
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+",cex=3,col="black")
+PredsProvs <- predict(gf.geo)
+PCprovs <- predict(pca, PredsProvs)
+points(PCprovs[, 1:2])
+
+
+# Show all the alleles
+######################
+SpsWtd <- sweep(gf.geo$Y, 2, apply(gf.geo$Y, 2, min),  "-")
+SpsWtdPCs <- (t(SpsWtd) %*% (PCprovs[, 1:2]))/colSums(SpsWtd)
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 3, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+points(SpsWtdPCs, pch = ".",cex=3,col="black") # col = alpha("black", 0.4)
+
+
+
+# Show some alleles
+###################
+snp <- "SNP_0008"
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main="x30")
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
 points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
 
 
@@ -1786,11 +1875,6 @@ snp <- "SNP_0109"
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
      main="x10")
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5)
 points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*10)
 
 
@@ -1798,11 +1882,6 @@ snp <- "SNP_6088"
 plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
      main="x30")
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
-# arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
-# jit <- 0.0015
-# text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
-#      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
-#      labels = vec,cex=1.5)
 points(PCprovs[, 1:2], col = "blue", cex = SpsWtd[,snp]*30)
 ```
 
@@ -1890,38 +1969,32 @@ plot(rast.go,box = FALSE,
 
 ### GF
 
+#### Set AvgWater MEM
 
-```{r GOSSP370GF, cache=T}
-rasValue <- raster::extract(stackall.lowres, PinpinDistri,cellnumbers=T)
-rasValue <- as.data.frame(rasValue)
-rasValue <- na.omit(rasValue)
-rasValue <- cbind(xyFromCell(stackall.lowres,rasValue[,1]),rasValue)
-rasValue <- rasValue %>% rename(longitude=x,latitude=y)
 
-# transform env using gf models, see ?predict.gradientForest
-projCurResWorldClim <- predict(gf, rasValue[,-3]) # remove cell column before transforming
+```{r GOSSP370GFMEM, cache=T}
+# `projCur.mem` is already in the same resolution (~31km2 spatial resolution) as the future climate projection.
 
 GOAcrossRange <- function(x){
   
   rasValue <- raster::extract(x, PinpinDistri,cellnumbers=T)
   rasValue <- as.data.frame(rasValue)
+  rasValue <- cbind(moraneigenvectors,rasValue)
   rasValue <- na.omit(rasValue)
-  rasValue <- cbind(xyFromCell(x,rasValue[,1]),rasValue)
-  rasValue <- rasValue %>% rename(longitude=x,latitude=y)
 
   # transform env using gf models, see ?predict.gradientForest
-  predFut <- predict(gf, rasValue[,-3])
+  predFut <- predict(gf.mem, rasValue %>%  dplyr::select(-cell))
   
   # calculate euclidean distance between current and future genetic spaces  
-  return(sqrt((projCurResWorldClim[,1]-predFut[,1])^2
-              + (projCurResWorldClim[,2]-predFut[,2])^2
-              + (projCurResWorldClim[,3]-predFut[,3])^2
-              + (projCurResWorldClim[,4]-predFut[,4])^2
-              + (projCurResWorldClim[,5]-predFut[,5])^2
-              + (projCurResWorldClim[,6]-predFut[,6])^2
-              + (projCurResWorldClim[,7]-predFut[,7])^2
-              + (projCurResWorldClim[,8]-predFut[,8])^2
-              + (projCurResWorldClim[,9]-predFut[,9])^2))
+  return(sqrt((projCur.mem[,1]-predFut[,1])^2
+              + (projCur.mem[,2]-predFut[,2])^2
+              + (projCur.mem[,3]-predFut[,3])^2
+              + (projCur.mem[,4]-predFut[,4])^2
+              + (projCur.mem[,5]-predFut[,5])^2
+              + (projCur.mem[,6]-predFut[,6])^2
+              + (projCur.mem[,7]-predFut[,7])^2
+              + (projCur.mem[,8]-predFut[,8])^2
+              + (projCur.mem[,9]-predFut[,9])^2))
 }
 
 # Calculate the GO for each GCM
@@ -1932,7 +2005,8 @@ names(genOffallGCMs) <- str_sub(ssp370stack.names,15,-5)
 dfGOallGCMs <- as.data.frame(genOffallGCMs)
 ```
 
-```{r GOSSP370GFPlotDens, fig.height=3,fig.width=6}
+
+```{r GOSSP370GFMEMPlotDens, fig.height=3,fig.width=6}
 # Distribution of the genomic offset for each GCM
 dfGOallGCMs %>%  
   pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
@@ -1967,13 +2041,113 @@ dfGOallGCMs %>%
     geom_density(size=1.5) +
     theme_bw() + 
     xlab("Genomic offset")
-
-# Keeping mean and SD for futher analyses
-# dfGOallGCMs <- dfGOallGCMs %>% dplyr::select(mean,sd) %>% dplyr::rename(MeanASmadcac=mean,SdASmadcac=sd)
-# DFtot <- bind_cols(DFtot,dfGOallGCMs)
 ```
 
-```{r PlotGOSSP370GF,fig.height=8,fig.width=8}
+```{r PlotGOSSP370GFMEM,fig.height=8,fig.width=8}
+rast.go <- ssp370stack[[1]][[1]]
+rasValue <- raster::extract(rast.go, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rast.go[rasValue$cell] <- dfGOallGCMs$mean
+# plot(rast.go,box = FALSE,
+#      axes = FALSE,
+#      alpha=0.8,
+#       col=colorRampPalette(c("blue","yellow","red"))(255),
+#      zlim=c(0,0.1))
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F)
+plot(rast.go,box = FALSE,
+     axes = FALSE,
+     #alpha=0.8,
+      col=colorRampPalette(c("blue","yellow","red"))(255),
+     #zlim=c(0,0.1),
+     add=T,
+     bgalpha=0)
+```
+
+
+#### Set AvgWater lat/long
+
+```{r GOSSP370GFGEO, cache=T}
+# We have to project the current climate in the same resolution as the future climate. 
+# So here we project the current climate in ~31km2 spatial resolution:
+rasValue <- raster::extract(stackall.lowres, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+rasValue <- cbind(xyFromCell(stackall.lowres,rasValue[,1]),rasValue)
+rasValue <- rasValue %>% rename(longitude=x,latitude=y)
+
+# transform env using gf models, see ?predict.gradientForest
+projCurResWorldClim <- predict(gf.geo, rasValue[,-3]) # remove cell column before transforming
+
+GOAcrossRange <- function(x){
+  
+  rasValue <- raster::extract(x, PinpinDistri,cellnumbers=T)
+  rasValue <- as.data.frame(rasValue)
+  rasValue <- na.omit(rasValue)
+  rasValue <- cbind(xyFromCell(x,rasValue[,1]),rasValue)
+  rasValue <- rasValue %>% rename(longitude=x,latitude=y)
+
+  # transform env using gf models, see ?predict.gradientForest
+  predFut <- predict(gf.geo, rasValue[,-3])
+  
+  # calculate euclidean distance between current and future genetic spaces  
+  return(sqrt((projCurResWorldClim[,1]-predFut[,1])^2
+              + (projCurResWorldClim[,2]-predFut[,2])^2
+              + (projCurResWorldClim[,3]-predFut[,3])^2
+              + (projCurResWorldClim[,4]-predFut[,4])^2
+              + (projCurResWorldClim[,5]-predFut[,5])^2
+              + (projCurResWorldClim[,6]-predFut[,6])^2
+              + (projCurResWorldClim[,7]-predFut[,7])^2
+              + (projCurResWorldClim[,8]-predFut[,8])^2
+              + (projCurResWorldClim[,9]-predFut[,9])^2))
+}
+
+# Calculate the GO for each GCM
+genOffallGCMs <- lapply(ssp370stack, GOAcrossRange)
+names(genOffallGCMs) <- str_sub(ssp370stack.names,15,-5)
+
+# convert to DF 
+dfGOallGCMs <- as.data.frame(genOffallGCMs)
+```
+
+```{r GOSSP370GFGEOPlotDens, fig.height=3,fig.width=6}
+# Distribution of the genomic offset for each GCM
+dfGOallGCMs %>%  
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+
+dfGOallGCMs$mean <- apply(dfGOallGCMs,1,mean)
+dfGOallGCMs$sd <- apply(dfGOallGCMs,1,sd)
+dfGOallGCMs$sdSup <- dfGOallGCMs$mean + dfGOallGCMs$sd
+dfGOallGCMs$sdInf <- dfGOallGCMs$mean - dfGOallGCMs$sd
+dfGOallGCMs$seSup <- dfGOallGCMs$mean + dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+dfGOallGCMs$seInf <- dfGOallGCMs$mean - dfGOallGCMs$sd/sqrt(length(dfGOallGCMs$mean))
+
+
+# Distribution of mean GO and its SE
+dfGOallGCMs %>%  
+  dplyr::select(mean,seSup,seInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+# Distribution of mean GO and SD Supp and Inf
+dfGOallGCMs %>%  
+  dplyr::select(mean,sdSup,sdInf) %>% 
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+```
+
+```{r PlotGOSSP370GFGEO,fig.height=8,fig.width=8}
 rast.go <- ssp370stack[[1]][[1]]
 rasValue <- raster::extract(rast.go, PinpinDistri,cellnumbers=T)
 rasValue <- as.data.frame(rasValue)

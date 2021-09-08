@@ -1,0 +1,2410 @@
+---
+title: "Estimating the genetic-environment relationship using GDM and GF"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+editor_options: 
+  chunk_output_type: console
+bibliography: references.bib 
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=TRUE,cache.lazy = FALSE)
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)
+library(hierfstat)
+library(reshape2)
+library(ggbiplot)
+library(gdm)
+#library(cowplot)
+#library(ggplot2)
+#library(ggpubr)
+#library(stringi)
+library(beepr)
+library(dplyr)
+#library(devtools)
+#library(xtable)
+library(tidyverse)
+#library(tibble)
+library(gradientForest)
+library(raster)
+library(sgdm)
+library(rgeos)
+library(adespatial) # to calculate the Moran eigen vectors
+library(kableExtra)
+```
+
+
+<!-- cache.lazy = FALSE is because one of the GF models had a error message and stopped the compilation of the rmarkdown document. -->
+<!-- Here the solution: https://stackoverflow.com/questions/39417003/long-vectors-not-supported-yet-error-in-rmd-but-not-in-r-script -->
+
+
+<!-- Functions & Options used -->
+
+```{r FuntionsOptionsUsed,echo=F}
+source("scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+# Gray scale
+grayscale_colors <- gray.colors(100,            # number of different color levels
+                                start = 0.0,    # how black (0) to go
+                                end = 1.0,      # how white (1) to go
+                                gamma = 2.2,    # correction between how a digital
+                                # camera sees the world and how human eyes see it
+                                alpha = NULL)
+
+PlotCors <- function(data,select.var,nbsize){
+  cor <- cor(data[,select.var])
+
+# matrix of the p-value of the correlation
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=45, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.01, insig = "blank", 
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE,number.cex=nbsize)
+
+pca <- prcomp(data[,select.var], center = TRUE,scale. = TRUE)
+
+ggbiplot(pca,varname.size =4) +  ylim(-2.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+}
+```
+
+
+In this document, we estimate the **genetic-environment relationships** using the modeling approaches proposed by @fitzpatrick2015ecological. 
+
+First, we model the relationship between the **reference SNPs** (the whole genomic data set) and four sets of environmental variables. Then, we model the relationship between the **candidate SNPs** and one set of environmental variables (the set `AvgWater`that is kept for the following analyses). 
+
+
+
+# Environmental and pop structure data
+
+## Env data
+
+The variables were extracted from @frejaville2018eumedclim (EuMedClim database) and represent the climatic conditions between 1900 and 2009.
+
+The variables included in the four sets of variables that we are going  to compare here were:
+
+- included in Worldclim, to facilitate the projection under future climates.
+
+- with a correlation coefficient lower than 0.80.
+
+
+```{r LoadEnvData}
+# We load the dataset with soil and climatic data:
+data <- readRDS(file="data/AllDataPhenoClimSoil.RDS")
+data <- data %>% select(prov,contains("ude_prov"),contains("WC"),contains("top_prov"),"depth_roots_prov")
+colnames(data) <- c("prov",
+                   str_sub(grep("ude_prov",colnames(data),value=TRUE),1,-6),
+                   str_sub(grep("bio",colnames(data),value=TRUE),1,-8),
+                   str_sub(grep("top_prov",colnames(data),value=TRUE),1,-6),
+                   str_sub(grep("roots_prov",colnames(data),value=TRUE),1,-6))
+data <- unique(data)
+data <- data[!(data$prov=="ROD"),] #rm the provenance with no genomic data
+
+# We add to the Topographic roughness index
+topo <- readRDS(file="data/Topography/DfTopoVarbyProv.rds")
+topo <- topo %>% dplyr::select(prov,TRI_WGS84_90m_R) %>% 
+                 dplyr::rename(TRI=TRI_WGS84_90m_R)
+data <- merge(data,topo,by="prov")
+
+# We add the Burned areas:
+data <- merge(data,readRDS(file="data/FireData/DfBurnedAreabyProv.rds"),by=c("prov","longitude","latitude"))
+
+# Showing the dataset:
+data %>% knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+```{r VizualizeEnvData,fig.height=7.3,fig.width=7.3}
+PlotCors(data,select.var =  colnames(data %>%  select(-prov)),nbsize=0.6)
+```
+
+
+### Set AvgSand
+
+Topographic variable: `TRI`.
+
+Soil variables:
+
+  - `sand_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing average climatic conditions:
+
+  - `bio1`: annual daily mean temperature (°C)
+  - `bio2`: mean diurnal temperature range (max-min, °C)
+  - `bio12`: annual precipitation (mm)
+  - `bio14`: precipitation of the driest month (mm)
+
+
+```{r SelectEnvDataSetAvgSand,fig.height=6,fig.width=6}
+select.var.AvgSand <- c("bio1","bio2","bio12","bio14","sand_top","depth_roots","TRI","BurnedArea")
+PlotCors(data,select.var = c(select.var.AvgSand,"latitude","longitude"),nbsize=1)
+```
+
+
+### Set AvgWater
+
+Topographic variable: `TRI`.
+
+Soil variables:
+
+  - `water_top` = Total available water content
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing average climatic conditions:
+
+  - `bio1`: annual daily mean temperature (°C)
+  - `bio2`: mean diurnal temperature range (max-min, °C)
+  - `bio12`: annual precipitation (mm)
+  - `bio14`: precipitation of the driest month (mm)
+
+
+```{r SelectEnvDataSetAvgWater,fig.height=6,fig.width=6}
+select.var.AvgWater <- c("bio1","bio2","bio12","bio14","water_top","depth_roots","TRI","BurnedArea")
+PlotCors(data,select.var = c(select.var.AvgWater,"latitude","longitude"),nbsize=1)
+```
+
+### Set ExtSand
+
+Topographic variable: `TRI`.
+
+Soil variables:
+
+  - `sand_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing episodic events:
+
+  - `bio5`: max temperature of the warmest month (°C)
+  - `bio6`: min temperature of the coldest month (°C)
+  - `bio13`: precipitation of the wettest month (mm)
+  - `bio14`: precipitation of the driest month (mm)
+  
+  
+```{r SelectEnvDataSetExtSand,fig.height=6,fig.width=6}
+select.var.ExtSand <- c("bio13","bio14","bio5","bio6","sand_top","depth_roots","TRI","BurnedArea")
+PlotCors(data,select.var = c(select.var.ExtSand,"latitude","longitude"),nbsize=1)
+```
+
+
+
+### Set ExtWater
+
+Topographic variable: `TRI`.
+
+Soil variables:
+
+  - `water_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing episodic events:
+
+  - `bio5`: max temperature of the warmest month (°C)
+  - `bio6`: min temperature of the coldest month (°C)
+  - `bio13`: precipitation of the wettest month (mm)
+  - `bio14`: precipitation of the driest month (mm)
+  
+  
+```{r SelectEnvDataSetExtWater,fig.height=6,fig.width=6}
+select.var.ExtWater <- c("bio13","bio14","bio5","bio6","water_top","depth_roots","TRI","BurnedArea")
+PlotCors(data,select.var = c(select.var.ExtWater,"latitude","longitude"),nbsize=1)
+```
+
+## Moran's eigenvectors
+
+In the GF models, we use **Moran's eigenvectors as proxies of the genetic population structure**. 
+
+From Fitzpatrick & Keller: "For GF, which cannot directly accommodate spatial effects, we attempted to account for the influence of spatial processes and unmeasured environmental variation using **Moran’s eigenvector map** (MEM) variables (Borcard & Legendre 2002; Dray et al. 2006). Briefly, MEM variables are the **eigenvectors of a spatial weighting matrix derived from the geographic coordinates of sampling locations**. The resulting **uncorrelated** spatial eigenfunctions can be used to model geographic structure in genetic patterns across a range of spatial scales. Following previous applications, we used the **first half of the MEM eigenfunctions with positive eigenvalues** (four in our case), which have been claimed to model broad-scale spatial genetic variation generated by processes such as demographic history and, more likely, unaccounted for environmental variation (Manel et al. 2010b, 2012; Sork et al. 2013). This approach has analogies to the use of latent factors to account for unobserved sources of genetic variation when testing gene–environment associations (Frichot et al. 2013), and given that MEMs may actually reflect unmeasured environmental patterns rather than true isolation-by-distance, they should be implemented and interpreted with caution."
+
+In our case, **there are four MEM eigenfunctions with positive eigenvalues, we select the four.**
+
+
+```{r MoranEigenVectors}
+mem <- dbmem(data[,c("latitude","longitude")]) 
+
+# Merge data and MEM
+mem <- bind_cols(data[,c("prov","latitude","longitude")],mem)
+mem %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+
+
+
+# Fitting the models on the reference SNPs
+
+Let's estimate the genetic-environment relationships for the reference SNPs.
+
+
+## Genomic data
+
+### GDM
+
+We have to load the Fst matrix (pairwise FST calculated using the Weir and Cockerman method).
+
+**<span style="color: red;">Question: Which FST matrix do we use? The scaled one or the one where we forced the fst values to be btw 0 and 1 by giving the value of zero to the two very small and negative values?</span>** The GDM models better converge when using the scaled FST matrix, especially when running the cross-validation with the function `gdm.cv` of the package `sgdm`.
+
+```{r LoadFstMatrix}
+# The one with neg values forced to zero:
+# fstmat <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_refSNPs_noNeg.rds")
+
+# The one that is scaled like (x - xmin)/(xmax-xmin):
+fstmat <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_refSNPs_scaled.rds")
+
+fstmat <- as.data.frame(fstmat) 
+fstmat <- fstmat %>%  tibble::rownames_to_column("prov") # The distance matrix must have as the first column the names of the provenances
+mean(unlist(fstmat[,-1]),na.rm=T)
+range(unlist(fstmat[,-1]),na.rm=T)
+sd(unlist(fstmat[,-1]),na.rm=T)
+```
+
+### GF
+
+```{r LoadGenoPrepared}
+geno <- readRDS(file="data/PreparedDFforGDMandGF/GF/ProvAllelFrequenciesAllSNPs.rds")
+```
+
+#### MAF per provenance
+
+We remove the SNPs that are polymorphic in 5 or less than 5 provenances: so here we remove 163 SNPs and there are 5002 SNPs left for the GF model.
+
+```{r RmMinorAlleleFrequencies}
+vec <- apply(geno[,-1],2,function(x) length(unique(x)))
+vecsup <- vec[vec>5]
+snps <- names(vecsup)
+length(vecsup) # Number of SNPs polymorphic in > 5 populations
+ncol(geno[,-1]) - length(vecsup) # Number of SNPs polymorphic in less than or equal to 5 populations
+genoMAF <- geno %>% dplyr::select(contains(c("prov",snps)))
+```
+
+
+## GDM analysis
+
+```{r perfDFGDM, echo=F}
+perf <- data.frame(Set=c("AvgSand","AvgWater","ExtSand","ExtWater"),ExpDev=NA,CV9=NA,CV6=NA,CV2=NA)
+```
+
+### Set AvgSand
+
+```{r FormatDataGDMAvgSand}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgSand)]
+
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab) %>% 
+  as_tibble() %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F)
+```
+
+Fit the GDM model:
+
+```{r RunningGDMAvgSand}
+# Running the GDM model:
+gdm.AvgSand <- gdm(gdmTab, geo=T)
+gdm.AvgSand
+```
+
+Let's evaluate the explanatory and predictive performance of the model:
+
+```{r PerfGDMAvgSand}
+# Deviance explained 
+perf[perf$Set=="AvgSand","ExpDev"] <- gdm.AvgSand$explained
+
+# sum(gdm.AvgSand$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+# if sum = 0: The algorithm was unable to fit a model to your data. The sum of the spline coefficients = 0 and deviance explained = NULL. Returning NULL object.
+
+# Cross-validation
+perf[perf$Set=="AvgSand","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="AvgSand","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="AvgSand","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+```
+
+> Fitting the I-splines
+
+From @fitzpatrick2016using, "The maximum height of each spline indicates the magnitude of total biological change along that gradient and thereby corresponds to the relative importance of that predictor in contributing to biological turnover while holding all other variables constant (i.e., is a partial ecological [genetic] distance)."
+
+```{r IsplinesGDMAvgSand,fig.height=9,fig.width=9,message=F}
+gdm.AvgSand.pred <- predict.gdm(gdm.AvgSand, gdmTab)
+
+plot(gdmTab$distance, gdm.AvgSand.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+# I-splines
+layout(matrix(1:9,3,3))
+gdm.AvgSand.splineDat <- isplineExtract(gdm.AvgSand)
+
+
+plot(gdm.AvgSand.splineDat$x[,"Geographic"], 
+     gdm.AvgSand.splineDat$y[,"Geographic"], 
+     lwd=3,type="l", 
+     xlab="Geographic distance", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9)) # or ylab= f(Geographic distance)
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio1"], 
+     gdm.AvgSand.splineDat[[2]][,"bio1"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual daily mean T° (C°)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio14"], 
+     gdm.AvgSand.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio2"], 
+     gdm.AvgSand.splineDat[[2]][,"bio2"], 
+     type="l",
+     lwd=3, 
+     xlab="Mean diurnal T° range (max-min, °C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio12"], 
+     gdm.AvgSand.splineDat[[2]][,"bio12"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual precipitation (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"sand_top"], 
+     gdm.AvgSand.splineDat[[2]][,"sand_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Sand content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"depth_roots"], 
+     gdm.AvgSand.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"TRI"], 
+     gdm.AvgSand.splineDat[[2]][,"TRI"], 
+     type="l",
+     lwd=3, 
+     xlab="Topographic Ruggdness Index", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"BurnedArea"], 
+     gdm.AvgSand.splineDat[[2]][,"BurnedArea"], 
+     type="l",
+     lwd=3, 
+     xlab="Burned areas", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+```
+
+> Variable relative importance
+
+In their article, Fitzpatrick & Keller say "To estimate relative importance of variables for GDM, we rescaled the maximum value of the fitted I-Splines between 0 and 1, which is proportional to variable importance."
+
+Let's calculate the variable relative importance:
+
+```{r relImpCovariatesAvgSand}
+# relative importance of the covariates
+apply(gdm.AvgSand.splineDat$y,2,max)
+
+# scaled relative importance of the covariates
+maxImp <- max(gdm.AvgSand.splineDat$y)
+RelVarImp <- gdm.AvgSand.splineDat$y / maxImp
+apply(RelVarImp,2,max)
+
+varimpgdm <- data.frame(relimp=apply(RelVarImp,2,max)) %>% 
+  rownames_to_column(var="covariate") %>% 
+  mutate(CovSet="AvgSand",SnpSet="Reference")
+```
+
+
+### Set AvgWater
+
+```{r FormatDataGDMAvgWater}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgWater)]
+
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+```
+
+Fit the GDM model:
+
+```{r RunningGDMAvgWater}
+# Running the GDM model:
+gdm.AvgWater <- gdm(gdmTab, geo=T)
+gdm.AvgWater
+
+# saving for the following analyses (projecting and calculating the genomic offset)
+saveRDS(gdm.AvgWater,file=paste0("outputs/GDM/models/GDMAvgWater_refSNPs.rds")) 
+```
+
+Let's evaluate the explanatory and predictive performance of the model:
+
+```{r PerfGDMAvgWater,message=F}
+# Deviance explained 
+perf[perf$Set=="AvgWater","ExpDev"] <- gdm.AvgWater$explained
+
+# Cross-validation
+perf[perf$Set=="AvgWater","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="AvgWater","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="AvgWater","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+```
+
+Fitting the I-splines:
+
+```{r IsplinesGDMAvgWater,fig.height=9,fig.width=9,message=F}
+# I-splines
+layout(matrix(1:9,3,3))
+gdm.AvgWater.splineDat <- isplineExtract(gdm.AvgWater)
+
+plot(gdm.AvgWater.splineDat$x[,"Geographic"], 
+     gdm.AvgWater.splineDat$y[,"Geographic"], 
+     lwd=3,type="l", 
+     xlab="Geographic distance", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+gdm.AvgWater.pred <- predict.gdm(gdm.AvgWater, gdmTab)
+
+plot(gdmTab$distance, gdm.AvgWater.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio1"], 
+     gdm.AvgWater.splineDat[[2]][,"bio1"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual daily mean T° (C°)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio14"], 
+     gdm.AvgWater.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio2"], 
+     gdm.AvgWater.splineDat[[2]][,"bio2"], 
+     type="l",
+     lwd=3, 
+     xlab="Mean diurnal T° range (max-min, °C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio12"], 
+     gdm.AvgWater.splineDat[[2]][,"bio12"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual precipitation (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"water_top"], 
+     gdm.AvgWater.splineDat[[2]][,"water_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Water content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"depth_roots"], 
+     gdm.AvgWater.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"TRI"], 
+     gdm.AvgWater.splineDat[[2]][,"TRI"], 
+     type="l",
+     lwd=3, 
+     xlab="Topographic Ruggdness Index", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"BurnedArea"], 
+     gdm.AvgWater.splineDat[[2]][,"BurnedArea"], 
+     type="l",
+     lwd=3, 
+     xlab="Burned areas", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+```
+
+> Variable relative importance
+
+```{r relImpCovariatesAvgWater}
+# relative importance of the covariates
+apply(gdm.AvgWater.splineDat$y,2,max)
+
+# scaled relative importance of the covariates
+maxImp <- max(gdm.AvgWater.splineDat$y)
+RelVarImp <- gdm.AvgWater.splineDat$y / maxImp
+apply(RelVarImp,2,max)
+
+varimpgdm <- data.frame(relimp=apply(RelVarImp,2,max)) %>% 
+  rownames_to_column(var="covariate") %>% 
+  mutate(CovSet="AvgWater",SnpSet="Reference") %>% 
+  bind_rows(varimpgdm)
+```
+
+
+### Set ExtSand
+
+```{r FormatDataGDMExtSand}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtSand)]
+
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+```
+
+
+Fit the GDM model:
+
+```{r RunningGDMExtSand}
+# Running the GDM model:
+gdm.ExtSand <- gdm(gdmTab, geo=T)
+gdm.ExtSand
+```
+
+Let's evaluate the explanatory and predictive performance of the model:
+
+```{r PerfGDMExtSand,message=F}
+# Deviance explained 
+perf[perf$Set=="ExtSand","ExpDev"] <- gdm.ExtSand$explained
+
+# Cross-validation
+perf[perf$Set=="ExtSand","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="ExtSand","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="ExtSand","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+```
+
+Fitting the I-splines:
+
+```{r IsplinesGDMExtSand,fig.height=9,fig.width=9,message=F}
+gdm.ExtSand.pred <- predict.gdm(gdm.ExtSand, gdmTab)
+
+plot(gdmTab$distance, gdm.ExtSand.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+# I-splines
+layout(matrix(1:9,3,3))
+gdm.ExtSand.splineDat <- isplineExtract(gdm.ExtSand)
+
+plot(gdm.ExtSand.splineDat$x[,"Geographic"], 
+     gdm.ExtSand.splineDat$y[,"Geographic"], 
+     lwd=3,type="l", 
+     xlab="Geographic distance", 
+     ylab="Partial genetic distance",# or ylab= f(Geographic distance)
+     ylim=c(0,0.9)) 
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio5"], 
+     gdm.ExtSand.splineDat[[2]][,"bio5"], 
+     type="l",
+     lwd=3, 
+     xlab="Max T° warmest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio6"], 
+     gdm.ExtSand.splineDat[[2]][,"bio6"], 
+     type="l",
+     lwd=3, 
+     xlab="Min T° of the coldest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio13"], 
+     gdm.ExtSand.splineDat[[2]][,"bio13"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the wettest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio14"], 
+     gdm.ExtSand.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"sand_top"], 
+     gdm.ExtSand.splineDat[[2]][,"sand_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Sand content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"depth_roots"], 
+     gdm.ExtSand.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"TRI"], 
+     gdm.ExtSand.splineDat[[2]][,"TRI"], 
+     type="l",
+     lwd=3, 
+     xlab="Topographic Ruggdness Index", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"BurnedArea"], 
+     gdm.ExtSand.splineDat[[2]][,"BurnedArea"], 
+     type="l",
+     lwd=3, 
+     xlab="Burned areas", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+```
+
+> Variable relative importance
+
+```{r relImpCovariatesExtSand}
+# relative importance of the covariates
+apply(gdm.ExtSand.splineDat$y,2,max)
+
+# scaled relative importance of the covariates
+maxImp <- max(gdm.ExtSand.splineDat$y)
+RelVarImp <- gdm.ExtSand.splineDat$y / maxImp
+apply(RelVarImp,2,max)
+
+varimpgdm <- data.frame(relimp=apply(RelVarImp,2,max)) %>% 
+  rownames_to_column(var="covariate") %>% 
+  mutate(CovSet="ExtSand",SnpSet="Reference") %>% 
+  bind_rows(varimpgdm)
+```
+
+
+
+### Set ExtWater
+
+```{r FormatDataGDMExtWater}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtWater)]
+
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+```
+
+Fit the GDM model:
+
+```{r RunningGDMExtWater}
+# Running the GDM model:
+gdm.ExtWater <- gdm(gdmTab, geo=T)
+gdm.ExtWater
+```
+
+Let's evaluate the explanatory and predictive performance of the model:
+
+```{r PerfGDMExtWater,message=F}
+# Deviance explained 
+perf[perf$Set=="ExtWater","ExpDev"] <- gdm.ExtWater$explained
+
+# Cross-validation
+perf[perf$Set=="ExtWater","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="ExtWater","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="ExtWater","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+```
+
+Fitting the I-splines:
+
+```{r IsplinesGDMExtWater,fig.height=9,fig.width=9,message=F}
+gdm.ExtWater.pred <- predict.gdm(gdm.ExtWater, gdmTab)
+
+plot(gdmTab$distance, gdm.ExtWater.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+# I-splines
+layout(matrix(1:9,3,3))
+gdm.ExtWater.splineDat <- isplineExtract(gdm.ExtWater)
+
+plot(gdm.ExtWater.splineDat$x[,"Geographic"], 
+     gdm.ExtWater.splineDat$y[,"Geographic"], 
+     lwd=3,type="l", 
+     xlab="Geographic distance", 
+     ylab="Partial genetic distance", # or ylab= f(Geographic distance)
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio5"], 
+     gdm.ExtWater.splineDat[[2]][,"bio5"], 
+     type="l",
+     lwd=3, 
+     xlab="Max T° warmest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio6"], 
+     gdm.ExtWater.splineDat[[2]][,"bio6"], 
+     type="l",
+     lwd=3, 
+     xlab="Min T° of the coldest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio13"], 
+     gdm.ExtWater.splineDat[[2]][,"bio13"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the wettest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio14"], 
+     gdm.ExtWater.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"water_top"], 
+     gdm.ExtWater.splineDat[[2]][,"water_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Water content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"depth_roots"], 
+     gdm.ExtWater.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"TRI"], 
+     gdm.ExtWater.splineDat[[2]][,"TRI"], 
+     type="l",
+     lwd=3, 
+     xlab="Topographic Ruggdness Index", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"BurnedArea"], 
+     gdm.ExtWater.splineDat[[2]][,"BurnedArea"], 
+     type="l",
+     lwd=3, 
+     xlab="Burned areas", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+```
+
+> Variable relative importance
+
+```{r relImpCovariatesExtWater}
+# relative importance of the covariates
+apply(gdm.ExtWater.splineDat$y,2,max)
+
+# scaled relative importance of the covariates
+maxImp <- max(gdm.ExtWater.splineDat$y)
+RelVarImp <- gdm.ExtWater.splineDat$y / maxImp
+apply(RelVarImp,2,max)
+
+varimpgdm <- data.frame(relimp=apply(RelVarImp,2,max)) %>% 
+  rownames_to_column(var="covariate") %>% 
+  mutate(CovSet="ExtWater",SnpSet="Reference") %>% 
+  bind_rows(varimpgdm)
+```
+
+
+
+### CV of the four sets of variables
+
+```{r PerfGF}
+perf %>% knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+## GF analysis
+
+
+### Set AvgSand
+
+
+```{r FormatDataGFAvgSand}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgSand)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelAvgSand,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("outputs/GF/models/GFAvgSand_refSNPs.rds")) 
+```
+
+
+```{r LoadModelAvgSand,cache=TRUE}
+gf <- readRDS(file=paste0("outputs/GF/models/GFAvgSand_refSNPs.rds"))
+```
+
+
+```{r PlotOverallImptanceGFAvgSand, fig.height=4,fig.width=8,cache=TRUE}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFAvgSand,fig.height=4,fig.width=4,cache=TRUE,fig.show="hold", out.width="33%"}
+# MEM 1
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8)
+
+# MEM 2
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8)
+
+# MEM 3
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM3",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8)
+
+# MEM 4
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM4",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8)
+
+# Annual daily mean T° (C°)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual daily mean T° (C°)", font=2,cex=0.8)
+
+# Mean diurnal T° range (max-min, °C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Mean diurnal T° range (max-min, °C)", font=2,cex=0.8)
+
+# Annual precipitation (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio12",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Sand content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="sand_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Sand content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+
+# Burned Areas
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="BurnedAreas",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Burned Areas", font=2,cex=0.8)
+```
+
+
+
+
+### Set AvgWater
+
+
+```{r FormatDataGFAvgWater}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgWater)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelAvgWater,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("outputs/GF/models/GFAvgWater_refSNPs.rds")) 
+```
+
+
+```{r LoadModelAvgWater,cache=TRUE}
+gf.mem <- readRDS(file=paste0("outputs/GF/models/GFAvgWater_refSNPs.rds"))
+```
+
+
+```{r PlotOverallImptanceGFAvgWater,cache=TRUE, fig.height=4,fig.width=8}
+plot(gf.mem, plot.type="Overall.Importance")
+mean(gf.mem$result)
+sd(gf.mem$result)
+```
+
+```{r PlotCumulativeImptanceGFAvgWater,cache=TRUE,fig.height=4,fig.width=4,fig.show="hold", out.width="33%"}
+# MEM 1
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8)
+
+# MEM 2
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8)
+
+# MEM 3
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM3",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8)
+
+# MEM 4
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM4",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8)
+
+# Annual daily mean T° (C°)
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="bio1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual daily mean T° (C°)", font=2,cex=0.8)
+
+# Mean diurnal T° range (max-min, °C)
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="bio2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Mean diurnal T° range (max-min, °C)", font=2,cex=0.8)
+
+# Annual precipitation (mm)
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="bio12",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Water content
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="water_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Water content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+
+# Burned Areas
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="BurnedAreas",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Burned Areas", font=2,cex=0.8)
+```
+
+
+
+### Set ExtSand
+
+
+```{r FormatDataGFExtSand}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtSand)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelExtSand,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("outputs/GF/models/GFExtSand_refSNPs.rds")) 
+```
+
+
+```{r LoadModelExtSand,cache=TRUE}
+gf <- readRDS(file=paste0("outputs/GF/models/GFExtSand_refSNPs.rds"))
+```
+
+
+```{r PlotOverallImptanceGFExtSand, fig.height=4,fig.width=8,cache=TRUE}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFExtSand,fig.height=4,fig.width=4,cache=TRUE,fig.show="hold", out.width="33%"}
+# MEM 1
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8)
+
+# MEM 2
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8)
+
+# MEM 3
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM3",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8)
+
+# MEM 4
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM4",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8)
+
+# Max T° warmest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio5",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Max T° warmest month (°C)", font=2,cex=0.8)
+
+# Min T° of the coldest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio6",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Min T° of the coldest month (°C)", font=2,cex=0.8)
+
+# Precipitation of the wettest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio13",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the wettest month (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Sand content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="sand_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Sand content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+
+# Burned Areas
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="BurnedAreas",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Burned Areas", font=2,cex=0.8)
+```
+
+
+
+### Set ExtWater
+
+
+```{r FormatDataGFExtWater}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtWater)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelExtWater,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("outputs/GF/models/GFExtWater_refSNPs.rds")) 
+```
+
+
+```{r LoadModelExtWater,cache=TRUE}
+gf <- readRDS(file=paste0("outputs/GF/models/GFExtWater_refSNPs.rds"))
+```
+
+
+```{r PlotOverallImptanceGFExtWater, fig.height=4,fig.width=8,cache=TRUE}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFExtWater,fig.height=4,fig.width=4,cache=TRUE,fig.show="hold", out.width="33%"}
+# MEM 1
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8)
+
+# MEM 2
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8)
+
+# MEM 3
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM3",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8)
+
+# MEM 4
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM4",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8)
+
+# Max T° warmest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio5",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Max T° warmest month (°C)", font=2,cex=0.8)
+
+# Min T° of the coldest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio6",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Min T° of the coldest month (°C)", font=2,cex=0.8)
+
+# Precipitation of the wettest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio13",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the wettest month (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Water content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="water_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Water content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+
+# Burned Areas
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="BurnedAreas",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Burned Areas", font=2,cex=0.8)
+```
+
+
+# Fitting the models on the common candidate SNPs
+
+Let's estimate the genetic-environment relationships for the reference SNPs.
+
+## GDM analysis
+
+```{r perfDFGDMComCand, echo=F}
+perf <- data.frame(Set=c("AvgSand","AvgWater","ExtSand","ExtWater"),ExpDev=NA,CV9=NA,CV6=NA,CV2=NA)
+```
+
+### Set AvgSand
+
+```{r RunGDMComCandAvgSand}
+fstmat <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_CommonCandidates_AvgSand_scaled.rds")
+
+fstmat <- as.data.frame(fstmat) 
+fstmat <- fstmat %>%  tibble::rownames_to_column("prov") # The distance matrix must have as the first column the names of the provenances
+
+# Format the data:
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgSand)]
+
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+
+# Running the GDM model:
+gdm.AvgSand <- gdm(gdmTab, geo=T)
+gdm.AvgSand
+
+# Deviance explained 
+perf[perf$Set=="AvgSand","ExpDev"] <- gdm.AvgSand$explained
+
+# Cross-validation
+perf[perf$Set=="AvgSand","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="AvgSand","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="AvgSand","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+
+# saving for the following analyses (projecting and calculating the genomic offset)
+saveRDS(gdm.AvgSand,file=paste0("outputs/GDM/models/GDMAvgSand_CommonCandidates.rds")) 
+```
+
+Fitting the I-splines:
+
+```{r IsplinesGDMAvgSandComCand,fig.height=9,fig.width=9,message=F}
+gdm.AvgSand.pred <- predict.gdm(gdm.AvgSand, gdmTab)
+
+plot(gdmTab$distance, gdm.AvgSand.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+# I-splines
+layout(matrix(1:9,3,3))
+gdm.AvgSand.splineDat <- isplineExtract(gdm.AvgSand)
+
+plot(gdm.AvgSand.splineDat$x[,"Geographic"], 
+     gdm.AvgSand.splineDat$y[,"Geographic"], 
+     lwd=3,type="l", 
+     xlab="Geographic distance", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9)) # or ylab= f(Geographic distance)
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio1"], 
+     gdm.AvgSand.splineDat[[2]][,"bio1"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual daily mean T° (C°)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio14"], 
+     gdm.AvgSand.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio2"], 
+     gdm.AvgSand.splineDat[[2]][,"bio2"], 
+     type="l",
+     lwd=3, 
+     xlab="Mean diurnal T° range (max-min, °C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"bio12"], 
+     gdm.AvgSand.splineDat[[2]][,"bio12"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual precipitation (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"sand_top"], 
+     gdm.AvgSand.splineDat[[2]][,"sand_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Sand content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"depth_roots"], 
+     gdm.AvgSand.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"TRI"], 
+     gdm.AvgSand.splineDat[[2]][,"TRI"], 
+     type="l",
+     lwd=3, 
+     xlab="Topographic Ruggdness Index", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgSand.splineDat[[1]][,"BurnedArea"], 
+     gdm.AvgSand.splineDat[[2]][,"BurnedArea"], 
+     type="l",
+     lwd=3, 
+     xlab="Burned Areas", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+```
+
+> Variable relative importance
+
+```{r relImpCovariatesComCandAvgSand}
+# relative importance of the covariates
+apply(gdm.AvgSand.splineDat$y,2,max)
+
+# scaled relative importance of the covariates
+maxImp <- max(gdm.AvgSand.splineDat$y)
+RelVarImp <- gdm.AvgSand.splineDat$y / maxImp
+apply(RelVarImp,2,max)
+
+varimpgdm <- data.frame(relimp=apply(RelVarImp,2,max)) %>% 
+  rownames_to_column(var="covariate") %>% 
+  mutate(CovSet="AvgSand",SnpSet="CommonCandidates") %>% 
+  bind_rows(varimpgdm)
+```
+
+
+### Set AvgWater
+
+```{r RunGDMComCandAvgWater}
+fstmat <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_CommonCandidates_AvgWater_scaled.rds")
+
+fstmat <- as.data.frame(fstmat) 
+fstmat <- fstmat %>%  tibble::rownames_to_column("prov") # The distance matrix must have as the first column the names of the provenances
+
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgWater)]
+
+# Format the data:
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+
+# Running the GDM model:
+gdm.AvgWater <- gdm(gdmTab, geo=T)
+gdm.AvgWater
+
+# saving for the following analyses (projecting and calculating the genomic offset)
+saveRDS(gdm.AvgWater,file=paste0("outputs/GDM/models/GDMAvgWater_CommonCandidates.rds")) 
+
+# Deviance explained 
+perf[perf$Set=="AvgWater","ExpDev"] <- gdm.AvgWater$explained
+
+# Cross-validation
+perf[perf$Set=="AvgWater","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="AvgWater","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="AvgWater","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+```
+
+Fitting the I-splines:
+
+```{r IsplinesGDMAvgWaterComCand,fig.height=9,fig.width=9,message=F}
+gdm.AvgWater.pred <- predict.gdm(gdm.AvgWater, gdmTab)
+
+plot(gdmTab$distance, gdm.AvgWater.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+# I-splines
+layout(matrix(1:9,3,3))
+gdm.AvgWater.splineDat <- isplineExtract(gdm.AvgWater)
+
+plot(gdm.AvgWater.splineDat$x[,"Geographic"], 
+     gdm.AvgWater.splineDat$y[,"Geographic"], 
+     lwd=3,type="l", 
+     xlab="Geographic distance", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio1"], 
+     gdm.AvgWater.splineDat[[2]][,"bio1"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual daily mean T° (C°)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio14"], 
+     gdm.AvgWater.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio2"], 
+     gdm.AvgWater.splineDat[[2]][,"bio2"], 
+     type="l",
+     lwd=3, 
+     xlab="Mean diurnal T° range (max-min, °C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"bio12"], 
+     gdm.AvgWater.splineDat[[2]][,"bio12"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual precipitation (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"water_top"], 
+     gdm.AvgWater.splineDat[[2]][,"water_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Water content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"depth_roots"], 
+     gdm.AvgWater.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"TRI"], 
+     gdm.AvgWater.splineDat[[2]][,"TRI"], 
+     type="l",
+     lwd=3, 
+     xlab="Topographic Ruggdness Index", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.AvgWater.splineDat[[1]][,"BurnedArea"], 
+     gdm.AvgWater.splineDat[[2]][,"BurnedArea"], 
+     type="l",
+     lwd=3, 
+     xlab="Burned Areas", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+```
+
+> Variable relative importance
+
+```{r relImpCovariatesComCandAvgWater}
+# relative importance of the covariates
+apply(gdm.AvgWater.splineDat$y,2,max)
+
+# scaled relative importance of the covariates
+maxImp <- max(gdm.AvgWater.splineDat$y)
+RelVarImp <- gdm.AvgWater.splineDat$y / maxImp
+apply(RelVarImp,2,max)
+
+varimpgdm <- data.frame(relimp=apply(RelVarImp,2,max)) %>% 
+  rownames_to_column(var="covariate") %>% 
+  mutate(CovSet="AvgWater",SnpSet="CommonCandidates") %>% 
+  bind_rows(varimpgdm)
+```
+
+
+### Set ExtSand
+
+```{r FormatDataGDMExtSandComCand}
+fstmat <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_CommonCandidates_ExtSand_scaled.rds")
+fstmat <- as.data.frame(fstmat) 
+fstmat <- fstmat %>%  tibble::rownames_to_column("prov")
+
+# Format the data:
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtSand)]
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+
+# Running the GDM model:
+gdm.ExtSand <- gdm(gdmTab, geo=T)
+gdm.ExtSand
+
+# Deviance explained 
+perf[perf$Set=="ExtSand","ExpDev"] <- gdm.ExtSand$explained
+
+# Cross-validation
+perf[perf$Set=="ExtSand","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="ExtSand","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="ExtSand","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+
+# saving for the following analyses (projecting and calculating the genomic offset)
+saveRDS(gdm.ExtSand,file=paste0("outputs/GDM/models/GDMExtSand_CommonCandidates.rds")) 
+```
+
+Fitting the I-splines:
+
+```{r IsplinesGDMExtSandComCand,fig.height=9,fig.width=9,message=F}
+# I-splines
+layout(matrix(1:9,3,3))
+gdm.ExtSand.splineDat <- isplineExtract(gdm.ExtSand)
+
+plot(gdm.ExtSand.splineDat$x[,"Geographic"], 
+     gdm.ExtSand.splineDat$y[,"Geographic"], 
+     lwd=3,type="l", 
+     xlab="Geographic distance", 
+     ylab="Partial genetic distance",# or ylab= f(Geographic distance)
+     ylim=c(0,0.9)) 
+
+gdm.ExtSand.pred <- predict.gdm(gdm.ExtSand, gdmTab)
+
+plot(gdmTab$distance, gdm.ExtSand.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio5"], 
+     gdm.ExtSand.splineDat[[2]][,"bio5"], 
+     type="l",
+     lwd=3, 
+     xlab="Max T° warmest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio6"], 
+     gdm.ExtSand.splineDat[[2]][,"bio6"], 
+     type="l",
+     lwd=3, 
+     xlab="Min T° of the coldest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio13"], 
+     gdm.ExtSand.splineDat[[2]][,"bio13"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the wettest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"bio14"], 
+     gdm.ExtSand.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"sand_top"], 
+     gdm.ExtSand.splineDat[[2]][,"sand_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Sand content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"depth_roots"], 
+     gdm.ExtSand.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"TRI"], 
+     gdm.ExtSand.splineDat[[2]][,"TRI"], 
+     type="l",
+     lwd=3, 
+     xlab="Topographic Ruggdness Index", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtSand.splineDat[[1]][,"BurnedArea"], 
+     gdm.ExtSand.splineDat[[2]][,"BurnedArea"], 
+     type="l",
+     lwd=3, 
+     xlab="Burned Areas", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+```
+
+> Variable relative importance
+
+```{r relImpCovariatesComCandExtSand}
+# relative importance of the covariates
+apply(gdm.ExtSand.splineDat$y,2,max)
+
+# scaled relative importance of the covariates
+maxImp <- max(gdm.ExtSand.splineDat$y)
+RelVarImp <- gdm.ExtSand.splineDat$y / maxImp
+apply(RelVarImp,2,max)
+
+varimpgdm <- data.frame(relimp=apply(RelVarImp,2,max)) %>% 
+  rownames_to_column(var="covariate") %>% 
+  mutate(CovSet="ExtSand",SnpSet="CommonCandidates") %>% 
+  bind_rows(varimpgdm)
+```
+
+
+
+### Set ExtWater
+
+```{r FormatDataGDMExtWaterComCand}
+fstmat <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_CommonCandidates_ExtWater_scaled.rds")
+fstmat <- as.data.frame(fstmat) 
+fstmat <- fstmat %>%  tibble::rownames_to_column("prov")
+
+# Format the data
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtWater)]
+gdmTab <- formatsitepair(fstmat, bioFormat=3, XColumn="longitude", YColumn="latitude",siteColumn="prov",
+ predData=subdata)
+head(gdmTab)
+
+# Running the GDM model:
+gdm.ExtWater <- gdm(gdmTab, geo=T)
+gdm.ExtWater
+
+# Deviance explained 
+perf[perf$Set=="ExtWater","ExpDev"] <- gdm.ExtWater$explained
+
+# Cross-validation
+perf[perf$Set=="ExtWater","CV9"] <- sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T)
+perf[perf$Set=="ExtWater","CV2"] <- sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T)
+perf[perf$Set=="ExtWater","CV6"] <- sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T)
+
+# saving for the following analyses (projecting and calculating the genomic offset)
+saveRDS(gdm.ExtWater,file=paste0("outputs/GDM/models/GDMExtWater_CommonCandidates.rds")) 
+```
+
+Fitting the I-splines:
+
+```{r IsplinesGDMExtWaterComCand,fig.height=9,fig.width=9,message=F}
+# I-splines
+layout(matrix(1:9,3,3))
+gdm.ExtWater.splineDat <- isplineExtract(gdm.ExtWater)
+
+plot(gdm.ExtWater.splineDat$x[,"Geographic"], 
+     gdm.ExtWater.splineDat$y[,"Geographic"], 
+     lwd=3,type="l", 
+     xlab="Geographic distance", 
+     ylab="Partial genetic distance", # or ylab= f(Geographic distance)
+     ylim=c(0,0.9))
+
+gdm.ExtWater.pred <- predict.gdm(gdm.ExtWater, gdmTab)
+
+plot(gdmTab$distance, gdm.ExtWater.pred, xlab="Observed genetic distance",
+ylab="Predicted genetic distance", pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio5"], 
+     gdm.ExtWater.splineDat[[2]][,"bio5"], 
+     type="l",
+     lwd=3, 
+     xlab="Max T° warmest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio6"], 
+     gdm.ExtWater.splineDat[[2]][,"bio6"], 
+     type="l",
+     lwd=3, 
+     xlab="Min T° of the coldest month (°C)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio13"], 
+     gdm.ExtWater.splineDat[[2]][,"bio13"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the wettest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"bio14"], 
+     gdm.ExtWater.splineDat[[2]][,"bio14"], 
+     type="l",
+     lwd=3, 
+     xlab="Precipitation of the driest month (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"water_top"], 
+     gdm.ExtWater.splineDat[[2]][,"water_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Water content in top layers (%)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"depth_roots"], 
+     gdm.ExtWater.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"TRI"], 
+     gdm.ExtWater.splineDat[[2]][,"TRI"], 
+     type="l",
+     lwd=3, 
+     xlab="Topographic Ruggdness Index", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.ExtWater.splineDat[[1]][,"BurnedArea"], 
+     gdm.ExtWater.splineDat[[2]][,"BurnedArea"], 
+     type="l",
+     lwd=3, 
+     xlab="Burned Areas", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+```
+
+
+> Variable relative importance
+
+```{r relImpCovariatesComCandExtWater}
+# relative importance of the covariates
+apply(gdm.ExtWater.splineDat$y,2,max)
+
+# scaled relative importance of the covariates
+maxImp <- max(gdm.ExtWater.splineDat$y)
+RelVarImp <- gdm.ExtWater.splineDat$y / maxImp
+apply(RelVarImp,2,max)
+
+varimpgdm <- data.frame(relimp=apply(RelVarImp,2,max)) %>% 
+  rownames_to_column(var="covariate") %>% 
+  mutate(CovSet="ExtWater",SnpSet="CommonCandidates") %>% 
+  bind_rows(varimpgdm)
+```
+
+
+### CV of the four sets of variables
+
+```{r PerfGFComCand}
+perf %>% knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+
+```{r SaveVarImpGDM}
+saveRDS(varimpgdm,file="outputs/GDM/RelImpCovariate/varimpgdm.rds")
+```
+
+
+`r knitr::opts_chunk$set(eval = F)`
+
+
+## GF analysis ### TO DOOOOOO
+
+
+```{r LoadGenoPreparedComCand}
+geno <- readRDS(file="data/PreparedDFforGDMandGF/GF/ProvAllelFrequenciesAllSNPs.rds")
+```
+
+### MAF per provenance
+
+We remove the SNPs that are polymorphic in 5 or less than 5 provenances: so here we remove 163 SNPs and there are 5002 SNPs left for the GF model.
+
+```{r RmMinorAlleleFrequenciesComCand}
+vec <- apply(geno[,-1],2,function(x) length(unique(x)))
+vecsup <- vec[vec>5]
+snps <- names(vecsup)
+length(vecsup) # Number of SNPs polymorphic in > 5 populations
+ncol(geno[,-1]) - length(vecsup) # Number of SNPs polymorphic in less than or equal to 5 populations
+genoMAF <- geno %>% dplyr::select(contains(c("prov",snps)))
+```
+
+### Set AvgSand
+
+
+```{r FormatDataGFAvgSandComCand}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgSand)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelAvgSandComCand,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("outputs/GF/models/GFAvgSand_refSNPs.rds")) 
+```
+
+
+```{r LoadModelAvgSandComCand,cache=TRUE}
+gf <- readRDS(file=paste0("outputs/GF/models/GFAvgSand_refSNPs.rds"))
+```
+
+
+```{r PlotOverallImptanceGFAvgSandComCand, fig.height=4,fig.width=8,cache=TRUE}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFAvgSandComCand,fig.height=4,fig.width=4,cache=TRUE,fig.show="hold", out.width="33%"}
+# MEM 1
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8)
+
+# MEM 2
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8)
+
+# MEM 3
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM3",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8)
+
+# MEM 4
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM4",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8)
+
+# Annual daily mean T° (C°)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual daily mean T° (C°)", font=2,cex=0.8)
+
+# Mean diurnal T° range (max-min, °C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Mean diurnal T° range (max-min, °C)", font=2,cex=0.8)
+
+# Annual precipitation (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio12",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Sand content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="sand_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Sand content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+```
+
+
+
+
+### Set AvgWater
+
+
+```{r FormatDataGFAvgWaterComCand}
+subdata <- data[,c("prov","latitude","longitude",select.var.AvgWater)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelAvgWaterComCand,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("outputs/GF/models/GFAvgWater_refSNPs.rds")) 
+```
+
+
+```{r LoadModelAvgWaterComCand,cache=TRUE}
+gf.mem <- readRDS(file=paste0("outputs/GF/models/GFAvgWater_refSNPs.rds"))
+```
+
+
+```{r PlotOverallImptanceGFAvgWaterComCand,cache=TRUE, fig.height=4,fig.width=8}
+plot(gf.mem, plot.type="Overall.Importance")
+mean(gf.mem$result)
+sd(gf.mem$result)
+```
+
+```{r PlotCumulativeImptanceGFAvgWaterComCand,cache=TRUE,fig.height=4,fig.width=4,fig.show="hold", out.width="33%"}
+# MEM 1
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8)
+
+# MEM 2
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8)
+
+# MEM 3
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM3",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8)
+
+# MEM 4
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM4",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8)
+
+# Annual daily mean T° (C°)
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="bio1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual daily mean T° (C°)", font=2,cex=0.8)
+
+# Mean diurnal T° range (max-min, °C)
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="bio2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Mean diurnal T° range (max-min, °C)", font=2,cex=0.8)
+
+# Annual precipitation (mm)
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="bio12",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Water content
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="water_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Water content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf.mem, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+```
+
+
+
+### Set ExtSand
+
+
+```{r FormatDataGFExtSandComCand}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtSand)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelExtSandComCand,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("outputs/GF/models/GFExtSand_refSNPs.rds")) 
+```
+
+
+```{r LoadModelExtSandComCand,cache=TRUE}
+gf <- readRDS(file=paste0("outputs/GF/models/GFExtSand_refSNPs.rds"))
+```
+
+
+```{r PlotOverallImptanceGFExtSandComCand, fig.height=4,fig.width=8,cache=TRUE}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFExtSandComCand,fig.height=4,fig.width=4,cache=TRUE,fig.show="hold", out.width="33%"}
+# MEM 1
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8)
+
+# MEM 2
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8)
+
+# MEM 3
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM3",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8)
+
+# MEM 4
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM4",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8)
+
+# Max T° warmest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio5",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Max T° warmest month (°C)", font=2,cex=0.8)
+
+# Min T° of the coldest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio6",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Min T° of the coldest month (°C)", font=2,cex=0.8)
+
+# Precipitation of the wettest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio13",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the wettest month (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Sand content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="sand_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Sand content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+```
+
+
+
+### Set ExtWater
+
+
+```{r FormatDataGFExtWaterComCand}
+subdata <- data[,c("prov","latitude","longitude",select.var.ExtWater)]
+
+df <- dplyr::inner_join(mem,subdata,by=c("prov","latitude","longitude"))
+df <- inner_join(df,genoMAF,by="prov")
+df[1:10,1:20] %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Dataset of geographic and env. variables
+envGF <- df %>% dplyr::select(-contains(c("longitude","latitude","prov","SNP"))) # get climate & MEM variables
+
+maxLevel <- log2(0.368*nrow(envGF)/2) #account for correlations, see ?gradientForest 
+
+# SNP dataset
+SNPs <- df %>% dplyr::select(contains("SNP")) # SNPs
+```
+
+Fit the GF model: 
+
+```{r RunGFmodelExtWaterComCand,eval=F}
+gf <- gradientForest(cbind(envGF, SNPs), predictor.vars=colnames(envGF),
+                        response.vars=colnames(SNPs), ntree=500, 
+                        maxLevel=maxLevel, trace=T, corr.threshold=0.50)
+saveRDS(gf,file=paste0("outputs/GF/models/GFExtWater_refSNPs.rds")) 
+```
+
+
+```{r LoadModelExtWaterComCand,cache=TRUE}
+gf <- readRDS(file=paste0("outputs/GF/models/GFExtWater_refSNPs.rds"))
+```
+
+
+```{r PlotOverallImptanceGFExtWaterComCand, fig.height=4,fig.width=8,cache=TRUE}
+plot(gf, plot.type="Overall.Importance")
+mean(gf$result)
+sd(gf$result)
+```
+
+```{r PlotCumulativeImptanceGFExtWaterComCand,fig.height=4,fig.width=4,cache=TRUE,fig.show="hold", out.width="33%"}
+# MEM 1
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM1",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8)
+
+# MEM 2
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM2",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8)
+
+# MEM 3
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM3",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8)
+
+# MEM 4
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="MEM4",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8)
+
+# Max T° warmest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio5",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Max T° warmest month (°C)", font=2,cex=0.8)
+
+# Min T° of the coldest month (°C)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio6",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Min T° of the coldest month (°C)", font=2,cex=0.8)
+
+# Precipitation of the wettest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio13",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the wettest month (mm)", font=2,cex=0.8)
+
+# Precipitation of the driest month (mm)
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="bio14",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Precipitation of the driest month (mm)", font=2,cex=0.8)
+
+# Water content
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="water_top",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Water content in the top layers (%)", font=2,cex=0.8)
+
+# Depth available to roots
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="depth_roots",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Depth available to roots", font=2,cex=0.8)
+
+# TRI
+plot(gf, plot.type="Cumulative.Importance",
+     imp.vars="TRI",
+     plot.args=list(show.species=FALSE,show.overall=TRUE))
+mtext(side=1, line=3.5, "Topographic Ruggdness Index", font=2,cex=0.8)
+```
+
+
+`r knitr::opts_chunk$set(eval = F)`
+
+# References

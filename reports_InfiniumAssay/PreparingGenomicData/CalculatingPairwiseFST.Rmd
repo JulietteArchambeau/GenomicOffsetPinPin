@@ -67,6 +67,7 @@ library(tidyverse)
 #library(tibble)
 library(raster)
 library(kableExtra)
+library(matrixcalc) # CRAN v1.0-3
 ```
 
 ```{r LoadNeededFunctions}
@@ -230,8 +231,7 @@ corrplot::corrplot(fst, method="color", col=col(200),
 
 ```{r MeanFst}
 # load again the FST matrix
-library(matrixcalc) # CRAN v1.0-3
-fst <- readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_refSNPs_withNeg.rds") %>% 
+readRDS(file="data/PreparedDFforGDMandGF/GDM/FstMatrices/FstMatrix5165Snps34Provs_refSNPs_withNeg.rds") %>% 
   upper.triangle() %>% 
   as.data.frame() %>% 
   rownames_to_column() %>% 

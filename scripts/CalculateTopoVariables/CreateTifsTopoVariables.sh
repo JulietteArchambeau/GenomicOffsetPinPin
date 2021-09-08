@@ -184,6 +184,14 @@ saga_cmd pj_proj4 4 -SOURCE TRI/gridsUTM31N/TRI.sgrd \
 gdal_translate -of GTiff TRI/gridsWGS84/TRI_WGS84.sdat TRI/TifsWGS84/TRI_WGS84.tif
 
 
+# Reproject in EPSG:3035 (ETRS89, LAEA)
+saga_cmd pj_proj4 0 -CRS_METHOD 0 -CRS_PROJ4 "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs" -GRIDS TRI/gridsUTM31N/TRI.sgrd
+saga_cmd pj_proj4 4 -SOURCE TRI/gridsUTM31N/TRI.sgrd \
+					-CRS_METHOD 0 \
+					-CRS_PROJ4 "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +units=m +no_defs" \
+					-TARGET_GRID TRI/gridsLAEA/TRI_LAEA.sgrd	
+gdal_translate -of GTiff TRI/gridsLAEA/TRI_LAEA.sdat TRI/TifsLAEA/TRI_LAEA.tif
+
 ####### 9/ Hillshade
 ####### ------------
 

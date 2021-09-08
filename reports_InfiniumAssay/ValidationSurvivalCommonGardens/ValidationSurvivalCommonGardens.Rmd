@@ -269,24 +269,39 @@ output %>% mutate_if(is.numeric, round, digits=4) %>%
 
 # Association btw candidate SNPs and survival
 
-This section can be divided in two parts: the SNP by SNP analyses and the analyses combining all SNPs
+This section can be divided in two parts: the SNP by SNP analysis and the analysis based on counts of SNPs
 
-First, we arrange the candidate SNPs so that the beneficial alleles in the dry common gardens (which are expected to be positively associated with survival in Madrid or Caceres) have the value "1" (the homozygotes with two beneficial alleles are noted with "2").
+First, we arrange the candidate SNPs so that the putative beneficial alleles in the dry common gardens (which are expected to be positively associated with survival in Madrid or Caceres) have the value "1" (the homozygotes with two beneficial alleles are noted with "2").
 
-**SNP by SNP analyses:** for each SNP, we aim to determine whether there is an association between the **SNP allele frequency across provenances** and the **proportion of survivors in the provenances**, independantly in Madrid, Caceres and Portugal. We build the following model:
+**SNP by SNP analysis:** for each SNP, we aim to determine whether there is an association between the **SNP allele frequency across provenances** and the **proportion of survivors in the provenances**, independantly in Madrid and Caceres. We build the following model:
 
 \begin{align*} 
 a_{p} &\sim \text{Binomial} (N_{p},p_{p}) \\
 \text{logit}(p_{p}) &= \beta_{0} + \beta_{1}Prop_{p} + \beta_{2}H_{p} \\
 \end{align*}
 
-with $a_{p}$ the count of individual that survived in the provenance $p$, $N_{g}$ the total number of individuals in the provenance $p$ (=number of individuals that were initially planted in the common garden for the provenance $p$), $Prop_{p}$ is the proportion of the allele considered in the population $p$, $H_{p}$ is the BLUPs for height of the provenance $p$ (calculated across all common gardens in the model 1 of paper 1).
+with $a_{p}$ the count of individual that survived in the provenance $p$, $N_{g}$ the total number of individuals in the provenance $p$ (=number of individuals that were initially planted in the common garden for the provenance $p$), $Prop_{p}$ is the proportion of the allele considered in the provenance $p$, $H_{p}$ is the BLUPs for height of the provenance $p$ (calculated across all common gardens in the model 1 of Archambeau et al. 2021).
 
 This model assumes that **tree height acts as a confounder**. Trees that were higher at the planting time have a higher probability of survival as it could have helped them to resist to the extreme drought event that happenned the same year. 
 
-We expect that there will be a positive association between the proportion of beneficial alleles and the proportions of survivors.
+For each SNP, we expect a positive association between the proportion of the putative beneficial allele and the proportions of survivors.
 
-In the output table:
+
+
+**Analysis based on counts of SNPs:** we aim to determine whether there is an association between the mean proportion of the putative beneficical alleles in the provenances and the proportion of survivors in the provenances, independently in Madrid and Caceres. We build the following model:
+
+  - Model 1 `M1`: This model assumes that survival is directly associated with the mean frequency of the drought-associated alleles in the provenances.
+
+\begin{align*} 
+a_{p} &\sim \text{Binomial} (N_{p},p_{p}) \\
+\text{logit}(p_{p}) &= \beta_{0} + \beta_{1}mProp_{p} + \beta_{2}H_{p} \\
+\end{align*}
+
+
+with $mProp_{p}$ the mean of the proportion of putative beneficial alleles in the provenance $p$.
+
+
+In the output table of the SNP-by-SNP analysis and the analysis basec on counts of SNPs:
   - `covar` covariate
   - `SNPset` set of candidate SNPs btw merged candidates, intermediate candidates and common candidates.
   - `NbDup1` the number of pairs of SNPs (among the candidate SNPs) that show a perfect correlation (|correlation coeff| = 1)
@@ -338,7 +353,7 @@ Here is the 10 first rows of the dataframe summing up the 1000 random samples of
 
 ```{r Parameters}
 covar="bio12"
-SNPset="MergedCand"
+SNPset="IntCand"
 CovSet <- "AvgWater"
 ```
 
@@ -363,11 +378,11 @@ DFcandcac[DFcandcac$covar==covar&DFcandcac$SNPset==SNPset,]
 
 # In the random SNPs:
 as.data.frame(table(DF$NbDup1)) %>% 
-  dplyr::rename("Number of duplicates (rho=1)"=Var1,"Number of random samples"=Freq) %>% 
+  dplyr::rename("Number of duplicates (rho=1)"=Var1,"Count of random samples"=Freq) %>% 
   kable() %>%
   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
 as.data.frame(table(DF$NbDup099)) %>% 
-  dplyr::rename("Number of nearly duplicates (rho>0.99)"=Var1,"Number of random samples"=Freq) %>% 
+  dplyr::rename("Number of nearly duplicates (rho>0.99)"=Var1,"Count of random samples"=Freq) %>% 
   kable() %>%
   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
 ```
@@ -401,6 +416,83 @@ Among the 1000 random samples of SNPs, there were between 0 and 11 SNPs for whic
 ### Analysis based on counts of SNPs
 
 ```{r VisualizeDFcaceres, fig.height=6,fig.width=11,warning=F,message=F}
+q025 <- quantile(DF$Beta1SNPcount, .025)
+q975 <- quantile(DF$Beta1SNPcount, .975)
+
+ggplot(DF, aes(Beta1SNPcount)) +
+  geom_histogram(aes(x=Beta1SNPcount, y=..density..), bins=50, fill="#d3d3d3", color="black") +
+  geom_density(color="gray10") +
+  ggtitle(TeX("Histogram and density plot of $\\beta_{1}$")) +
+  xlab(TeX("$\\beta_{1}$ of randomly selected SNPs")) +
+  ylab("Density") +
+  theme_bw() + 
+  geom_vline(aes(xintercept = DFcandcac[DFcandcac$covar==covar&DFcandcac$SNPset==SNPset,"Beta1SNPcount"],
+                 linetype = "grou"),color = "red", size=1) +
+  geom_segment(aes(x=q025,xend=q975, y=0, yend=0), size=3) + 
+  scale_linetype(name = "",labels=lapply(sprintf("$\\beta_{1}$ of the drought-associated candidate SNPs"), TeX)) +
+  theme(legend.position = c(0.81,0.93),legend.text = element_text(color="red",size = 12))
+```
+
+
+
+## Madrid
+
+```{r DFRandMadrid,eval=F}
+DF <- readRDS(file = paste0("outputs/ValidationSurvivalCommonGardens/RandomSNPs/DF_",covar,"_",CovSet,"_",SNPset,"_madrid.rds"))
+
+DF[1:10,1:ncol(DF)] %>%
+  mutate(CrossZero1SNPcount = cell_spec(CrossZero1SNPcount, "html", color = ifelse(CrossZero1SNPcount == "*", "red", "gray"))) %>% 
+  knitr::kable(format = "html", escape = F) %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+### Duplicates
+
+```{r DuplicatesRandomMadrid,eval=F}
+# In the candidate SNPs:
+DFcandcac[DFcandcac$covar==covar&DFcandcac$SNPset==SNPset,]
+
+# In the random SNPs:
+as.data.frame(table(DF$NbDup1)) %>% 
+  dplyr::rename("Number of duplicates (rho=1)"=Var1,"Count of random samples"=Freq) %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+as.data.frame(table(DF$NbDup099)) %>% 
+  dplyr::rename("Number of nearly duplicates (rho>0.99)"=Var1,"Count of random samples"=Freq) %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+**Most of the random samples do not contain duplicated SNPs.** 
+
+
+### SNP-by-SNP analysis
+
+```{r BarplotMadrid,eval=F}
+countSigni <- as.data.frame(table(DF$NbSigniRand)) %>% 
+  dplyr::rename(NbSigniRand=Var1,CountRandSamp=Freq) %>% 
+  mutate(NbSigniRand=as.numeric(as.character(NbSigniRand)))
+
+ggplot(countSigni, aes(x=NbSigniRand,y=CountRandSamp)) +  
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  ggtitle(TeX("Bar plot of the number of random SNPs that have a significant association with survival")) +
+  xlab(TeX("Number of significant random SNPs")) +
+  ylab("Count of random samples of SNPs") +
+  geom_vline(aes(xintercept = DFcandcac[DFcandcac$covar==covar&DFcandcac$SNPset==SNPset,"NbSigniCand"],linetype = "grou"),color = "red", size=1) +
+  scale_linetype(name = "",labels=lapply(sprintf("Number of significant candidate SNPs"), TeX)) +
+  theme(legend.position = c(0.8,0.9),
+        legend.text = element_text(color="red",size = 11),
+        plot.title = element_text(size=12))
+```
+
+Among the 1000 random samples of SNPs, there were between 0 and 11 SNPs for which the p-value of $\beta_{1}$ was lower than 0.05 and for which $\beta_{1}$ and $\rho$ (correlation coefficient between the SNP frequency and the precipitation of the driest month) have opposite signs. As a reminder, there were 15 SNPs in this case in the drought-associated candidates SNPs. SO, this is promising, but we have to check that this is not due to the high level of duplicates in the selected SNPs. p-values < 0.05 for the drought-associated candidate SNPs. However ,I have to check that this is not due to the duplicates, I think I shoud redo it without the duplicates.
+
+
+### Analysis based on counts of SNPs
+
+```{r VisualizeDFMadrid, fig.height=6,fig.width=11,warning=F,message=F,eval=F}
 q025 <- quantile(DF$Beta1SNPcount, .025)
 q975 <- quantile(DF$Beta1SNPcount, .975)
 
