@@ -1,0 +1,211 @@
+---
+title: "Set of selected environmental variables"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)      # CRAN v1.26
+library(vegan)      # CRAN v2.5-6    to investigate correlations among predictors
+library(psych)      # CRAN v1.8.12   to run RDA and to plot the pairs panels
+library(tidyverse)  # CRAN v1.3.0
+library(kableExtra) # CRAN v1.1.0
+library(raster)     # CRAN v3.3-13 
+```
+
+# Data munging
+
+## Loading phenotypic data
+
+We load the dataset with phenotypic data from a previous paper; script is available here: https://github.com/JulietteArchambeau/H2Pinpin/blob/master/scripts/DataMunging/00_CleaningPhenotypeDataNew.R
+
+In this dataset, clones with no population structure data have already been removed (e.g. ARN1).
+
+<!-- It was updated in November 2019 and before I used the dataset AllDataPhenoClimSoil.RDS with CLONAPIN data of 2018. Some really minor mistakes were corrected between the two versions. -->
+
+```{r LoadPhenoData}
+data <- readRDS(file="data/PhenoDataNovember2019.rds")
+```
+
+## Merging phenotypic and WorldClim climatic data
+
+We add to the phenotypic data the climatic values in each provenance from WorldClim (from 1970 to 2000).
+
+```{r MergingWorldClimData}
+# create a df of the provenance coordinates
+xy <- unique(data[,c("prov","longitude_prov","latitude_prov")])
+
+# Path to WorldClim data
+path="data/climate/CurrentClimate/WorldClim30sec_1970_2000/"
+
+# List the WorldClim files (the bioclimatic variables)
+myFiles <- list.files(path,pattern=".tif")
+
+vars <- str_sub(myFiles,11,-5) %>% str_remove("_") %>% str_c("WC_prov")
+
+for (i in 1:length(myFiles)){
+  rast <- raster(paste0(path,myFiles[i]))
+  xy[,vars[i]] <- raster::extract(rast,xy[,c("longitude_prov","latitude_prov")])}
+
+data <- merge(data,xy,by=c("prov","longitude_prov","latitude_prov"))
+
+sapply(data,function(x) sum(is.na(x)))
+```
+
+Great, no missing data in the climatic variables.
+
+
+## Merging soil and population structure data
+
+```{r MergeSoilPopStructure}
+data2018 <- readRDS(file="data/AllDataPhenoClimSoil.RDS") %>% 
+  dplyr::select(clon,prov,contains("top_prov"),"depth_roots_prov",paste0(rep("Q",6),1:6),max.Q) %>% 
+  unique()
+
+data <- left_join(data,data2018, by=c("clon","prov"))
+data %>% dplyr::select(colnames(data2018)) %>% 
+                         sapply(function(x) sum(is.na(x)))
+```
+
+Great, no missing data in the columns we merged.
+
+
+## Merging topography
+
+We include in the dataset the *topographic ruggedness index*.
+
+Topographic data were generated from NASA's Shuttle Radar Topography Mission (SRTM) at 90-m resolution. We used the SAGA v 2.3.1 (Conrad et al. 2015) to calculate the topographic ruggedness index (TRI) which quantifies the terrain heterogeneity, i.e. differences in elevation between adjacent cells (Riley et al. 1999).
+
+```{r MergingTopo}
+topo <- readRDS(file="data/Topography/DfTopoVarbyProv.rds")%>% 
+  dplyr::select(prov,TRI_WGS84_90m_R) %>% 
+  dplyr::rename(TRI=TRI_WGS84_90m_R)
+
+data <- data %>% merge(topo,by="prov")
+
+# checking the missing data
+data %>% dplyr::select(colnames(topo)) %>% 
+                         sapply(function(x) sum(is.na(x)))
+```
+
+Great, no missing data.
+
+## Merging burned area
+
+We include the average of the monthly burned area (in hectares) from June 1995 to December 2014 was extracted from the GFED4 database (Giglio et al., 2013). 
+
+```{r MergingBurnedArea}
+BurnedArea <- readRDS(file="data/FireData/DfBurnedAreabyProv.rds") %>% dplyr::select(BurnedArea,prov)
+
+data <- data %>% 
+  merge(BurnedArea,by="prov")
+
+# checking the missing data
+data %>% dplyr::select(colnames(BurnedArea)) %>% 
+                         sapply(function(x) sum(is.na(x)))
+```
+
+Great, no missing data.
+
+## Saving the dataset
+
+
+```{r SavingDataset}
+saveRDS(data,"data/PhenoEnvPopStructureDataset.RDS")
+```
+
+
+# Selected environmnental variables
+
+Here the set of covariates we are going to use in this paper:
+
+Burned area: `BurnedArea`.
+
+Topographic variable:`TRI`: topographic ruggedness index
+
+Soil variables:
+
+  - `water_top` = sand content in the top layers of the soil
+  - `depth_roots` = Depth available to roots
+
+Climatic variables representing episodic events:
+
+  - `bio5`: max temperature of the warmest month (°C)
+  - `bio6`: min temperature of the coldest month (°C)
+  - `bio12`: annual precipitation (mm)
+  - `bio15`: precipitation Seasonality (Coefficient of Variation)
+
+
+This set of covariates was selected because:
+
+  - in previous analyses based on a subset of the genomic data (Infinium assay data), this is the set (among 6 sets tested) that shows the highest number of candidate SNPs. 
+  
+  - this set has biological sense. In particular, it includes `bio 6`, the minimum temperature of the coldest month, and studies are accumulating showing that maritime pine patterns of adaptation to climate are associated with minimum temperaturees. 
+  
+```{r CorrelationsPanels,fig.height=9,fig.width=12}
+select.var <- c("bio5WC_prov",
+                "bio6WC_prov",
+                "bio12WC_prov",
+                "bio15WC_prov",
+                "water_top_prov",
+                "depth_roots_prov",
+                "TRI",
+                "BurnedArea")
+
+data %>% 
+  dplyr::select(all_of(select.var)) %>% 
+  unique() %>% 
+  dplyr::rename(bio5="bio5WC_prov",
+                bio6="bio6WC_prov",
+                bio12="bio12WC_prov",
+                bio15="bio15WC_prov",
+                water_top="water_top_prov",
+                depth_roots="depth_roots_prov") %>% 
+  pairs.panels(scale=T,hist.col="palegreen1")
+```
+
+
