@@ -1,5 +1,5 @@
 ---
-title: "Formatting and exploring genomic data"
+title: "Formatting, exploring and imputing genomic data"
 author: "Juliette Archambeau"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
@@ -51,8 +51,8 @@ options(width = 300)
 library(knitr)      # CRAN v1.26
 library(dplyr)      # CRAN v1.0.0
 library(tidyverse)  # CRAN v1.3.0
-library(readxl)
-library(magrittr)
+library(readxl)     # CRAN v1.3.1
+library(magrittr)   # CRAN v2.0.1
 library(kableExtra) # CRAN v1.1.0
 ```
 
@@ -150,14 +150,19 @@ list.alleles <- lapply(colnames(sub), function(x){
     
   } else if (length(colnames(tab))==3){ # common case, e.g. A/A, A/G and G/G
     
-    major <- names(which.max(tab))
-    minor <- names(which.min(tab))
+    if(tab[,1]==tab[,3]){ # to account for cases where there is the same number of A/A and G/G 
+      major <- colnames(tab)[1]
+      minor <- colnames(tab)[3]
+      } else {
+    major <- names(which.max(tab[,c(1,3)]))
+    minor <- names(which.min(tab[,c(1,3)]))
+      }
     mid <- setdiff(names(tab),c(major,minor))  
     
     case_when(vec == major ~ 0,
               vec == minor ~ 2,
               vec == mid   ~ 1) 
-  }
+  } #else {vec <- rep(3,529)} #  I used this line to check that there was no other case
 })
 
 names(list.alleles) <- colnames(sub) # reattribute the SNP ID to list names
@@ -310,7 +315,7 @@ snp.list <- snp.list %>%
   merge(codes_SNP2,by="SNP2")
 
 # Export the list of SNPs with correlation coefficient of one 
-write_csv(snp.list,"data/GenomicData/FormattedData/CorrelatedSnps.csv")
+write_csv(snp.list,"data/GenomicData/FormattedData/CorrelatedSnps.csv",append=F)
 ```
 
 
@@ -351,7 +356,8 @@ plot(tab$id,tab$freq.NAs,
 We are going to keep the `r nrow(tab[tab$freq.NAs<20,])` clones that have less than 20% missing data. 
 
 ```{r RemoveCloneMissingData}
-df <- df %>% dplyr::select(tab[tab$freq.NAs<20,]$clone)
+df <- df %>% 
+  dplyr::select(tab[tab$freq.NAs<20,]$clone)
 ```
 
 ## Minor allele frequencies
@@ -414,6 +420,12 @@ df <- df[(row.names(df) %in% tab[tab$freq.NAs<20,]$snp),]
 
 **<span style="color: red;">We keep SNPs with missing data lower than 20% and so there are `r nrow(df)` SNPs left.</span>**
 
+```{r ReorderColumns}
+# We reorder the columns (clone names) in the alphabetical order.
+df <- df %>%  dplyr::select(order(colnames(df)))
+```
+
+
 # Export the genomic data
 
 ```{r ExportGenomicDataRDS}
@@ -426,12 +438,161 @@ saveRDS(df,
 
 
 ```{r ExportGenomicDataCSV}
-df <- codes %>% 
+df.csv <- codes %>% 
   merge(df %>% rownames_to_column(var="snp_ID"),by="snp_ID") %>% 
   dplyr::rename(juliette_snp_ID=snp_ID)
 
-write_csv(df,
+write_csv(df.csv,
         paste0("data/GenomicData/FormattedData/GenomicData_",nclone,"clones_",nsnp,"snps.csv"),
         append=FALSE)
 ```
+
+# Imputation of missing data
+
+Percentage of missing data in the entire genomic dataset: `r round(sum(is.na(df)) * 100 / (dim(df)[1]*dim(df)[2]),2)`%.
+
+We can use two ways to impute the missing values:
+
+  1. Method from the [RDA vignette](https://popgen.nescent.org/2018-03-27_RDA_GEA.html) but that we are not going to use here. We can impute the missing values using the most common allele at each SNP across all individuals.
+
+  2. Method that we are going to use: Imputation of the missing values using the most common allele at each SNP within the gene pool. So here, the genotypes are classified according to the main gene pool they belong to (although we aknowledge that some genotypes are admixed and belong to different gene pools).
+
+
+
+## First method (not used)
+
+Using the most common allele at each SNP across all individuals.
+
+```{r 1stMethodImputation, eval=F}
+gen.imp <- apply(df, 2, function(x) replace(x, is.na(x), as.numeric(names(which.max(table(x))))))
+sum(is.na(gen.imp)) # No NAs
+```
+
+
+## Second method (the one we use in the paper)
+
+Using the most common genotype at each SNP within the main gene pool this genotype belong to.
+
+We load the dataset in which there is the proportion of belonging of each genotype to a given gene pool.
+
+```{r LoadingPropAncestry}
+prop <- readRDS(file="data/PhenoEnvPopStructureDataset.RDS") %>% 
+  dplyr::select(clon,prov,paste0(rep("Q",6),1:6),max.Q) %>%  
+  unique() %>% 
+  drop_na()
+```
+
+We check whether some clones in the genomic dataset have no population structure data.
+
+```{r IdentifyClonesNoPopStructure}
+setdiff(colnames(df),prop$clon)
+```
+
+One clone, OLO17, has no structure data. If we look at the other clones of the OLO population, all mainly belong to the French Atlantic gene pool (`Q4`):
+
+```{r OLOclones}
+prop.OLO <- prop %>% dplyr::filter(prov == "OLO")
+
+prop.OLO %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+Among the `r nrow(prop.OLO)` clones of the OLO population, the proportion of belonging from the French Atlantic gene pool ranges from `r min(prop.OLO$Q4)` to `r max(prop.OLO$Q4)`. So there is a high probability that OLO17 also belong mainly from the French Atlantic gene pool. That's why we consider in the following analyses that OLO17 mainly belong from the French Atlantic gene pool.
+
+```{r MergePopStructureWithGenomicData}
+mainGP <- prop %>% dplyr::select(clon,max.Q) # extract the main gene pool for each clone.
+
+mainGP[nrow(mainGP) + 1,] <- c("OLO17","Q4") # we add the main  gene pool of OLO17
+
+gen.imp <- df %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("clon") %>%  
+  left_join(mainGP,by="clon") %>% 
+  dplyr::select(clon,max.Q,everything())
+
+gen.imp[1:10,1:10] %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+```{r CheckingImputation1, echo=F, eval=F}
+# If we want to check that the imputation worked fine
+  # Find some SNPs with NAs
+subset <- gen.imp[gen.imp$max.Q=="Q5",]
+sample(colnames(subset)[colSums(is.na(subset)) > 0],3,replace=F) #extract some SNPs with NAs
+sum(is.na(subset)) # 14,965 NAs in Q5 gene pool
+
+table(subset[,"snp_12238"]) # NAs of this SNP should take the value '2' after imputation.
+table(subset[,"snp_10182"]) # NAs of this SNP should take the value '1' after imputation.
+table(subset[,"snp_7628"]) # NAs of this SNP should take the value '2' after imputation.
+```
+
+
+We impute the missing data:
+
+```{r NAsImputation}
+# Replace NAs by (1) subseting by GP, (2) imputing NAs, (3) reassembling the GP.
+for(i in unique(gen.imp$max.Q)){
+  subset <- gen.imp[gen.imp$max.Q==i,]
+  subset <- apply(subset[,3:ncol(subset)], 2, function(x) replace(x, is.na(x), as.numeric(names(which.max(table(x))))))
+  gen.imp[gen.imp$max.Q==i,3:ncol(gen.imp)] <- subset
+}
+```
+
+
+```{r CheckingImputation2, echo=F, eval=F}
+# If we want to check that the imputation worked fine
+  # Look at the SNPs that had NAs before imputation
+subset <- gen.imp[gen.imp$max.Q=="Q5",]
+sum(is.na(subset)) # 0 NAs now!
+
+table(subset[,"snp_12238"]) # great! (NAs of this SNP has taken the values '2' after imputation)
+table(subset[,"snp_10182"]) # great! (The missing value of this SNP has taken the value '1' after imputation)
+table(subset[,"snp_7628"]) # great! (The missing value of this SNP has taken the value '2' after imputation)
+```
+
+Formating the dataset (reattributing clone names, clones in columns and snp in rows, etc.):
+
+```{r ReformatImputedDataset}
+rownames(gen.imp) <- gen.imp$clon
+gen.imp <- gen.imp %>% 
+  dplyr::select(-clon,-max.Q) %>% 
+  t() %>% 
+  as.data.frame()
+
+# Visualization:
+gen.imp[1:10,1:10] %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+ 
+## Exporting the dataset
+
+We save this dataset to use it in the univariate genotype-environment association analysis with <span style="font-variant:small-caps;">BayPass</span>:
+
+```{r ExportGenomicDataImputedRDS}
+nsnp <- nrow(gen.imp)
+nclone <- ncol(gen.imp)
+
+saveRDS(gen.imp,
+        paste0("data/GenomicData/FormattedData/ImputedGenomicData_",nclone,"clones_",nsnp,"snps.rds"))
+```
+
+
+```{r ExportGenomicDataImputedCSV}
+gen.imp.csv <- codes %>% 
+  merge(gen.imp %>% rownames_to_column(var="snp_ID"),by="snp_ID") %>% 
+  dplyr::rename(juliette_snp_ID=snp_ID)
+
+write_csv(gen.imp.csv,
+        paste0("data/GenomicData/FormattedData/ImputedGenomicData_",nclone,"clones_",nsnp,"snps.csv"),
+        append=FALSE)
+```
+
 
