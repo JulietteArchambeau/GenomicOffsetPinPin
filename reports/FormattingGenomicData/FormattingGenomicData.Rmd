@@ -351,13 +351,19 @@ plot(tab$id,tab$freq.NAs,
      ylab="Percentage of missing data per clone")
 ```
 
-**<span style="color: red;">`r nrow(tab[tab$freq.NAs<20,])` clones have the percentage of missing data lower than 20% and `r nrow(tab[tab$freq.NAs<15,])` lower than 15%.</span>**
+**<span style="color: red;">`r nrow(tab[tab$freq.NAs<20,])` clones have the percentage of missing data lower than 20%, `r nrow(tab[tab$freq.NAs<18,])` lower than 18% and `r nrow(tab[tab$freq.NAs<15,])` lower than 15%.</span>**
 
-We are going to keep the `r nrow(tab[tab$freq.NAs<20,])` clones that have less than 20% missing data. 
+Which threshold do we choose for the missing data per clone?
+
+```{r ThresholdNAperClones}
+threshold.NA.per.clone <- 18
+```
+
+We are going to keep the `r nrow(tab[tab$freq.NAs<threshold.NA.per.clone,])` clones that have less than `r threshold.NA.per.clone`% missing data. 
 
 ```{r RemoveCloneMissingData}
 df <- df %>% 
-  dplyr::select(tab[tab$freq.NAs<20,]$clone)
+  dplyr::select(tab[tab$freq.NAs<threshold.NA.per.clone,]$clone)
 ```
 
 ## Minor allele frequencies
@@ -447,6 +453,76 @@ write_csv(df.csv,
         append=FALSE)
 ```
 
+# Information useful for the paper
+
+We want to know how many SNPs were genotyped in the Infiunium assay, in the Affymetric assay and in both. 
+
+```{r NumberSNPgenotypedAssays}
+nb <- sapply(df.csv[,1:4], function(x) sum(!(is.na(x))))
+
+df.noNAS <- df.csv[,c(1,3,4)] %>% drop_na()
+```
+
+Among the `r nb[[1]]` SNPs used in this paper (after filtering), **`r nb[[3]]` were genotyped in the Affymetrix assay**, **`r nb[[4]]` in the Infinium assay** and **`r nrow(df.noNAS)` were genotyped by both assays**.
+
+We want to know the same for the clones, i.e. how many clones were genotypes by each assay and by both.
+
+```{r NumberClonesGenotypedAssays}
+tab.clon <- data[4:nrow(data),1:2] %>% 
+  setNames(c("clon","assay")) %>% 
+  filter(clon %in% colnames(df))
+
+# sapply(tab.clon, function(x) sum(is.na(x))) # (to check) No NAs, great .
+
+#tab.clon <- table(tab.clon$assay)
+table(tab.clon$assay)
+```
+
+
+<!-- Among the `r ncol(df)` clones used in the present paper (after filtering), **`r tab.clon[[1]]` were genotyped in both the Affymetrix and Infinium assays** and **`r tab.clon[[2]]` clones were only genotyped by the Affymetrix assay**. -->
+
+All clones were genotyped with both the Affymetrix and Infinium assays.
+
+We want the average number of missing data per tree:
+
+```{r MissingDataPerclone}
+tab <- df %>% 
+  sapply(function(x) sum(is.na(x))*100/nrow(df)) %>% 
+  as.data.frame() %>%
+  set_colnames(c("freq.NAs")) %>% 
+  rownames_to_column(var = "clone") %>% 
+  as_tibble() %>% 
+  arrange(desc(freq.NAs)) %>% 
+  mutate(id=1:nrow(.))
+
+
+plot(tab$id,tab$freq.NAs,
+     pch=20,
+     xlab="Clone number",
+     ylab="Percentage of missing data per clone")
+# 
+# CAR14     21.4   455
+# BAY13     21.5   456
+# OLO17     21.9   457
+
+tab[c(1:10,(nrow(tab)-5):nrow(tab)),] %>%
+  kable() %>%  
+  kable_styling(font_size=11,
+                bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
+  
+```
+
+
+```{r GenerateTableLatexSuppInfoNbClonesPerProv, echo=F, eval=F}
+# We generate a table for the Supplementary Information of the paper, with the number of clones (i.e. trees) per provenance:
+tibble(Provenance=str_sub(colnames(df),1,3),clon=colnames(df)) %>% 
+  group_by(Provenance) %>% 
+  count(name="Nb.clones") %>% 
+  kable("latex", booktabs=T) 
+```
+
+
+
 # Imputation of missing data
 
 Percentage of missing data in the entire genomic dataset: `r round(sum(is.na(df)) * 100 / (dim(df)[1]*dim(df)[2]),2)`%.
@@ -500,6 +576,8 @@ prop.OLO %>%
 ```
 
 Among the `r nrow(prop.OLO)` clones of the OLO population, the proportion of belonging from the French Atlantic gene pool ranges from `r min(prop.OLO$Q4)` to `r max(prop.OLO$Q4)`. So there is a high probability that OLO17 also belong mainly from the French Atlantic gene pool. That's why we consider in the following analyses that OLO17 mainly belong from the French Atlantic gene pool.
+
+Comment: if the threshold of missing data per clone is 18% (or 15%), then we don't have to care about OLO17 as it is not included in the selected clones.
 
 ```{r MergePopStructureWithGenomicData}
 mainGP <- prop %>% dplyr::select(clon,max.Q) # extract the main gene pool for each clone.
