@@ -69,10 +69,6 @@ In our case, maritime pine has a strong population structure [@jaramillo2015mole
 ## Genomic data
 
 ```{r LoadGenomicData}
-# gen.imp <- readRDS(file="data/GenomicData/FormattedData/ImputedGenomicData_457clones_9833snps.rds") %>% 
-#   t() %>% 
-#   as.data.frame()
-
 gen.imp <- readRDS(file="data/GenomicData/FormattedData/ImputedGenomicData_454clones_9817snps.rds") %>% 
   t() %>% 
   as.data.frame()
@@ -80,9 +76,12 @@ gen.imp <- readRDS(file="data/GenomicData/FormattedData/ImputedGenomicData_454cl
 
 The genomic dataset contains `r ncol(gen.imp)` clones (i.e. genotypes) and `r nrow(gen.imp)` SNPs. Missing data were imputed based on the main gene pool of the clone (using the most common allele at each SNP).
 
-We have to remove the clone `OLO17` as we don't know its proporition of membership to the different gene pools, and we need these proportions to correct by population structure in the RDA.
 
-```{r RmOLO17}
+```{r RmOLO17, echo=F,eval=F}
+# Only if we use the dataset: ImputedGenomicData_454clones_9817snps.rds
+
+# We have to remove the clone `OLO17` as we don't know its proporition of membership to the different gene pools, and we need these proportions to correct by population structure in the RDA.
+
 gen.imp <- gen.imp %>% 
   filter(!(rownames(.)=="OLO17"))
 ```
