@@ -1,0 +1,302 @@
+---
+title: "Creating the rasters of the environmental covariates"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: kable
+    highlight: textmate
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+editor_options:
+  chunk_output_type: console
+always_allow_html: true
+---
+
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=F)
+options(width = 300)
+library(knitr)
+library(kableExtra)
+library(dplyr)
+library(tidyverse)
+library(raster)
+library(stringr)
+```
+
+Climatic variables:
+
+```{r ClimaticVariables}
+clim.var <- c("bio5","bio6","bio12","bio15")
+```
+
+
+Load the mask of the maritime pine distribution (made with Euforgen data and the NFI plots)
+
+```{r LoadMask}
+PinpinDistri <- shapefile('data/maps/MaskPinpinDistri/PinpinDistriEUforgen_NFIplotsBuffer10km.shp')
+plot(PinpinDistri)
+```
+
+`r knitr::opts_chunk$set(eval = F)`
+
+# Current climate (res 30 seconds)
+
+We create raster stacks with the topographic, soil, fire-related variables and current climatic conditions from WorldClim (i.e. from 1970 to 2000).
+
+```{r CurrentClimateRes30sec}
+
+# Climatic rasters
+# ----------------
+grids <- list.files("data/climate/CurrentClimate/WorldClim30sec_1970_2000/")
+grids <- grids[grepl("bio_5|bio_6|bio_12|bio_15",grids)==T]
+grids <- c(grids[[3]],grids[[4]],grids[[1]],grids[[2]]) # reorder
+rast.clim <- raster::stack(paste0("data/climate/CurrentClimate/WorldClim30sec_1970_2000/", grids))
+names(rast.clim) <- clim.var
+rast.clim <- crop(rast.clim,extent(PinpinDistri)) 
+rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
+
+
+# Soil rasters
+# ------------
+rast.soil <- stack("data/soil/STU_EU_T_TAWC_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+names(rast.soil) <- c("water_top","depth_roots")
+rast.soil <- raster::crop(rast.soil,extent(rast.clim))   # attribute the extent of climatic raster to soil raster
+rast.soil <- raster::resample(rast.soil,rast.clim)       # same number of cells between the soil and climatic rasters
+rast.soil <- mask(rast.soil,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
+
+
+# TRI raster
+# ----------
+# > The models are fitted with TRI values from raster at 90m resolution, and the 
+# projections will be on raster at 1km resolution (to have the same resolution as WorldClim variables).
+rast.tri <- raster("data/Topography/TRI_WGS84.tif")
+rast.tri <- crop(rast.tri,extent(rast.clim))           # attribute the extent of climatic raster to TRI rasters
+rast.tri <- raster::resample(rast.tri,rast.clim)       # same number of cells between the TRI and climatic rasters
+names(rast.tri) <- c("TRI")
+rast.tri <- mask(rast.tri,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
+
+
+# Burned Area raster
+# ------------------
+rast.BA <- raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
+rast.BA <- crop(rast.BA,extent(rast.clim))
+rast.BA <- raster::resample(rast.BA,rast.clim)
+names(rast.BA) <- "BurnedArea"
+rast.BA <- mask(rast.BA,PinpinDistri,updatevalue=NA)
+
+
+# Merge and save the rasters in a stack
+# ------------------------------------
+stackall <- stack(rast.clim,rast.soil,rast.tri,rast.BA)
+stackall
+writeRaster(stackall, filename="data/StacksEnvVars/Stack_CurrentClimate_Res30seconds.grd", format="raster",overwrite=TRUE)
+```
+
+# Future climate (res 2.5 minutes)
+
+> Period: 2041-2060
+
+## SSP3-7.0 
+
+We create stacks of environmental variables (future climate, topography & soil). Regarding the future climate, we use the predictions of the nine global climate models available in WorldClim for the period 2041 to 2060 and the Shared-socio Economic Pathway (SSP) 370 (https://www.worldclim.org/data/cmip6/cmip6climate.html).
+
+```{r FutureClimateSSP370}
+rast.to.crop <- raster("data/StacksEnvVars/Stack_CurrentClimate_Res30seconds.grd")
+
+# The nine global climate models:
+GCMs <- list.files("data/climate/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/")
+GCMs
+
+list.rast.GCMs <- sapply(GCMs, function(i){
+  
+  rast.clim <- stack(paste0("data/climate/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/",i,"/ssp370/wc2.1_2.5m_bioc_",i,"_ssp370_2041-2060.tif"))
+  
+  # I understand that these 19 variables here are the WorldClim bioclimatic variables averaged over the period 2041/2060.
+  
+  select.layers <- names(rast.clim)[grepl("2060.5$|2060.6|2060.12|2060.15",names(rast.clim))==T]
+  rast.clim <- raster::subset(rast.clim,select.layers)
+  names(rast.clim) <- clim.var
+  #rast.clim <- rast.clim[[clim.var]]
+  rast.clim <- raster::crop(rast.clim,extent(rast.to.crop))
+  rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
+}, USE.NAMES = TRUE,simplify=FALSE)
+  
+
+# Soil rasters
+rast.soil <- stack("data/soil/STU_EU_T_TAWC_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+names(rast.soil) <- c("water_top","depth_roots")
+rast.soil <- raster::crop(rast.soil,extent(list.rast.GCMs[[1]]))
+rast.soil <- raster::resample(rast.soil,list.rast.GCMs[[1]])
+rast.soil <- mask(rast.soil,PinpinDistri,updatevalue=NA)
+  
+# TRI raster
+rast.tri <- raster("data/Topography/TRI_WGS84.tif")
+rast.tri <- crop(rast.tri,extent(list.rast.GCMs[[1]]))
+rast.tri <- raster::resample(rast.tri,list.rast.GCMs[[1]])
+names(rast.tri) <- c("TRI")
+rast.tri <- mask(rast.tri,PinpinDistri,updatevalue=NA)
+  
+# Burned Area
+rast.BA <- raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
+rast.BA <- crop(rast.BA,extent(list.rast.GCMs[[1]]))
+rast.BA <- raster::resample(rast.BA,list.rast.GCMs[[1]])
+names(rast.BA) <- "BurnedArea"
+rast.BA <- mask(rast.BA,PinpinDistri,updatevalue=NA)
+  
+
+for(i in GCMs){
+  
+  stackall <- stack(list.rast.GCMs[[i]],rast.soil,rast.tri,rast.BA)
+  
+  writeRaster(stackall, 
+              filename=paste0("data/StacksEnvVars/FutureClimate/2041to2060/SSP370/Stack_",str_remove_all(i,"-"),".grd"), format="raster",overwrite=TRUE)
+  
+}
+```
+
+## SSP5-8.5
+
+```{r FutureClimateSSP585}
+# We remove the GCM that is not included in this SSP:
+GCMs <- GCMs[!GCMs=="GFDL-ESM4"]
+
+list.rast.GCMs <- sapply(GCMs, function(i){
+  
+  rast.clim <- stack(paste0("data/climate/FutureClimate/share/spatial03/worldclim/cmip6/7_fut/2.5m/",i,"/ssp585/wc2.1_2.5m_bioc_",i,"_ssp585_2041-2060.tif"))
+  
+  # I understand that these 19 variables here are the WorldClim bioclimatic variables averaged over the period 2041/2060.
+  
+  select.layers <- names(rast.clim)[grepl("2060.5$|2060.6|2060.12|2060.15",names(rast.clim))==T]
+  rast.clim <- raster::subset(rast.clim,select.layers)
+  names(rast.clim) <- clim.var
+  #rast.clim <- rast.clim[[clim.var]]
+  rast.clim <- raster::crop(rast.clim,extent(rast.to.crop))
+  rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
+}, USE.NAMES = TRUE,simplify=FALSE)
+  
+
+# Soil rasters
+rast.soil <- stack("data/soil/STU_EU_T_TAWC_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+names(rast.soil) <- c("water_top","depth_roots")
+rast.soil <- raster::crop(rast.soil,extent(list.rast.GCMs[[1]]))
+rast.soil <- raster::resample(rast.soil,list.rast.GCMs[[1]])
+rast.soil <- mask(rast.soil,PinpinDistri,updatevalue=NA)
+  
+# TRI raster
+rast.tri <- raster("data/Topography/TRI_WGS84.tif")
+rast.tri <- crop(rast.tri,extent(list.rast.GCMs[[1]]))
+rast.tri <- raster::resample(rast.tri,list.rast.GCMs[[1]])
+names(rast.tri) <- c("TRI")
+rast.tri <- mask(rast.tri,PinpinDistri,updatevalue=NA)
+  
+# Burned Area
+rast.BA <- raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
+rast.BA <- crop(rast.BA,extent(list.rast.GCMs[[1]]))
+rast.BA <- raster::resample(rast.BA,list.rast.GCMs[[1]])
+names(rast.BA) <- "BurnedArea"
+rast.BA <- mask(rast.BA,PinpinDistri,updatevalue=NA)
+  
+
+for(i in GCMs){
+  
+  stackall <- stack(list.rast.GCMs[[i]],rast.soil,rast.tri,rast.BA)
+  
+  writeRaster(stackall, 
+              filename=paste0("data/StacksEnvVars/FutureClimate/2041to2060/SSP585/Stack_",str_remove_all(i,"-"),".grd"), format="raster",overwrite=TRUE)
+  
+}
+```
+
+
+
+# Current climate (res 2.5 min)
+
+
+```{r CurrentClimateRes25min}
+rast.to.crop <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP370/Stack_BCCCSM2MR.grd")
+
+# Climatic rasters
+# ----------------
+grids <- list.files("data/climate/CurrentClimate/WorldClim30sec_1970_2000/")
+grids <- grids[grepl("bio_5|bio_6|bio_12|bio_15",grids)==T]
+grids <- c(grids[[3]],grids[[4]],grids[[1]],grids[[2]]) # reorder
+rast.clim <- raster::stack(paste0("data/climate/CurrentClimate/WorldClim30sec_1970_2000/", grids))
+names(rast.clim) <- clim.var
+rast.clim <- crop(rast.clim,extent(rast.to.crop)) 
+rast.clim <- raster::resample(rast.clim,rast.to.crop,method="ngb")
+rast.clim <- mask(rast.clim,PinpinDistri, updatevalue=NA)
+
+
+# Soil rasters
+# ------------
+rast.soil <- stack("data/soil/STU_EU_T_TAWC_WGS84.tif","data/soil/STU_EU_DEPTH_ROOTS_WGS84.tif")
+names(rast.soil) <- c("water_top","depth_roots")
+rast.soil <- raster::crop(rast.soil,extent(rast.clim))   # attribute the extent of climatic raster to soil raster
+rast.soil <- raster::resample(rast.soil,rast.clim)       # same number of cells between the soil and climatic rasters
+rast.soil <- mask(rast.soil,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
+
+
+# TRI raster
+# ----------
+# > The models are fitted with TRI values from raster at 90m resolution, and the 
+# projections will be on raster at 1km resolution (to have the same resolution as WorldClim variables).
+rast.tri <- raster("data/Topography/TRI_WGS84.tif")
+rast.tri <- crop(rast.tri,extent(rast.clim))           # attribute the extent of climatic raster to TRI rasters
+rast.tri <- raster::resample(rast.tri,rast.clim)       # same number of cells between the TRI and climatic rasters
+names(rast.tri) <- c("TRI")
+rast.tri <- mask(rast.tri,PinpinDistri,updatevalue=NA) # keep only cells within maritime pine distribution 
+
+
+# Burned Area raster
+# ------------------
+rast.BA <- raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
+rast.BA <- crop(rast.BA,extent(rast.clim))
+rast.BA <- raster::resample(rast.BA,rast.clim)
+names(rast.BA) <- "BurnedArea"
+rast.BA <- mask(rast.BA,PinpinDistri,updatevalue=NA)
+
+
+# Merge and save the rasters in a stack
+# ------------------------------------
+stackall <- stack(rast.clim,rast.soil,rast.tri,rast.BA)
+stackall
+writeRaster(stackall, filename="data/StacksEnvVars/Stack_CurrentClimate_Res25minutes.grd", format="raster",overwrite=TRUE)
+```
