@@ -50,12 +50,12 @@ pre[class] {
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
 options(width = 300)
-library(knitr)
-library(vegan)  # to investigate correlations among predictors
-library(psych)  # to plot the pairs panels
-library(tidyverse)
-library(corrplot)
-library(kableExtra)
+library(knitr)      # CRAN v1.26
+library(vegan)      # CRAN v2.5-6
+library(psych)      # CRAN v1.8.12
+library(tidyverse)  # CRAN v1.3.0
+library(corrplot)   # CRAN v0.84
+library(kableExtra) # CRAN v1.1.0
 ```
 
 ```{r BayPassUtils}
@@ -102,7 +102,6 @@ cd ~/Bureau/baypass_2.2/sources
 We load the genomic dataset: 
 
 ```{r LoadGenomicData}
-#geno <- readRDS(file="data/GenomicData/FormattedData/ImputedGenomicData_457clones_9833snps.rds") %>% t() %>% as.data.frame()
 geno <- readRDS(file="data/GenomicData/FormattedData/ImputedGenomicData_454clones_9817snps.rds") %>% t() %>% as.data.frame()
 geno[1:10,1:10]
 ```
@@ -111,7 +110,7 @@ There are `r dim(geno)[2]` SNPs and `r dim(geno)[1]` clones (i.e. genotypes). Mi
 
 The genomic data for <span style="font-variant:small-caps;">BayPass</span> needs to be allele counts for each SNP in each of the provenance. 
 
-```{r CalculateAlleleCounts, eval=T}
+```{r CalculateAlleleCounts, eval=F}
 count.2nd.allele = function(x) {2*length(x)-sum(x)}
 stats = c('sum', 'count.2nd.allele')
 
@@ -250,7 +249,7 @@ Here is the first run to estimate the covariance matrix $\Omega$:
 ```{bash EstimateOmegaRun1, eval=T}
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/CovarianceMatrixOmega
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -outprefix anacore1 \
     -seed 44
 ```
@@ -308,25 +307,25 @@ abline(h=3,lty=2) #0.001 p--value theshold
 ```{bash EstimateOmegaIndependantRuns, eval=F}
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/CovarianceMatrixOmega
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -outprefix anacore2 \
     -seed 444
     
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/CovarianceMatrixOmega
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -outprefix anacore3 \
     -seed 204
     
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/CovarianceMatrixOmega
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -outprefix anacore4 \
     -seed 284
     
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/CovarianceMatrixOmega
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -outprefix anacore5 \
     -seed 428
 ```
@@ -413,35 +412,35 @@ var <- "bio5"
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISruns_bio5
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio5 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis1 \
     -seed 44
     
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio5 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis2 \
     -seed 444
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio5 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis3 \
     -seed 204
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio5 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis4 \
     -seed 284
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio5 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis5 \
@@ -512,35 +511,35 @@ var <- "bio6"
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISruns_bio6
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio6 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis1 \
     -seed 44
     
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio6 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis2 \
     -seed 444
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio6 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis3 \
     -seed 204
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio6 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis4 \
     -seed 284
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio6 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis5 \
@@ -611,35 +610,35 @@ var <- "bio12"
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISruns_bio12
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio12 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis1 \
     -seed 44
     
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio12 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis2 \
     -seed 444
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio12 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis3 \
     -seed 204
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio12 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis4 \
     -seed 284
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio12 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis5 \
@@ -712,35 +711,35 @@ var <- "bio15"
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISruns_bio15
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio15 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis1 \
     -seed 44
     
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio15 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis2 \
     -seed 444
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio15 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis3 \
     -seed 204
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio15 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis4 \
     -seed 284
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/bio15 \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis5 \
@@ -813,35 +812,35 @@ var <- "water_top"
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISruns_WaterTop
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/water_top \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis1 \
     -seed 44
     
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/water_top \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis2 \
     -seed 444
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/water_top \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis3 \
     -seed 204
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/water_top \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis4 \
     -seed 284
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/water_top \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis5 \
@@ -914,35 +913,35 @@ Minimum temperature of the coldest month (°C)
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISruns_DepthRoots
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/depth_roots \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis1 \
     -seed 44
     
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/depth_roots \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis2 \
     -seed 444
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/depth_roots \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis3 \
     -seed 204
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/depth_roots \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis4 \
     -seed 284
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/depth_roots \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis5 \
@@ -1014,35 +1013,35 @@ var <- "TRI"
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISruns_TRI
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/TRI \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis1 \
     -seed 44
     
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/TRI \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis2 \
     -seed 444
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/TRI \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis3 \
     -seed 204
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/TRI \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis4 \
     -seed 284
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/TRI \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis5 \
@@ -1112,35 +1111,35 @@ var <- "BurnedArea"
 cd ~/Documents/GenomicOffset/GenomicOffsetPinPin/outputs/CandidateSNPs/baypass/ISruns_BurnedArea
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/BurnedArea \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis1 \
     -seed 44
     
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/BurnedArea \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis2 \
     -seed 444
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/BurnedArea \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis3 \
     -seed 204
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/BurnedArea \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis4 \
     -seed 284
 
 ~/Bureau/baypass_2.2/sources/g_baypass \
-    -gfile ../9833snps457clones_ImpNABayPass \
+    -gfile ../9817snps454clones_ImpNABayPass \
     -efile ../EnvironmentalVariables/BurnedArea \
     -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
     -outprefix anacovis5 \
