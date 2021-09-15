@@ -11,6 +11,7 @@ output:
        collapsed: false
     number_sections: true
     highlight: textmate
+bibliography: references.bib
 editor_options: 
   chunk_output_type: console
 ---
@@ -351,7 +352,7 @@ plot(tab$id,tab$freq.NAs,
      ylab="Percentage of missing data per clone")
 ```
 
-**<span style="color: red;">`r nrow(tab[tab$freq.NAs<20,])` clones have the percentage of missing data lower than 20%, `r nrow(tab[tab$freq.NAs<18,])` lower than 18% and `r nrow(tab[tab$freq.NAs<15,])` lower than 15%.</span>**
+`r nrow(tab[tab$freq.NAs<20,])` clones have the percentage of missing data lower than 20%, `r nrow(tab[tab$freq.NAs<18,])` lower than 18% and `r nrow(tab[tab$freq.NAs<15,])` lower than 15%.
 
 Which threshold do we choose for the missing data per clone?
 
@@ -359,7 +360,7 @@ Which threshold do we choose for the missing data per clone?
 threshold.NA.per.clone <- 18
 ```
 
-We are going to keep the `r nrow(tab[tab$freq.NAs<threshold.NA.per.clone,])` clones that have less than `r threshold.NA.per.clone`% missing data. 
+**<span style="color: red;">We are going to keep the `r nrow(tab[tab$freq.NAs<threshold.NA.per.clone,])` clones that have less than `r threshold.NA.per.clone`% missing data.</span>**
 
 ```{r RemoveCloneMissingData}
 df <- df %>% 
@@ -455,6 +456,8 @@ write_csv(df.csv,
 
 # Information useful for the paper
 
+## How many SNPs genotyped in each assay?
+
 We want to know how many SNPs were genotyped in the Infiunium assay, in the Affymetric assay and in both. 
 
 ```{r NumberSNPgenotypedAssays}
@@ -465,6 +468,8 @@ df.noNAS <- df.csv[,c(1,3,4)] %>% drop_na()
 
 Among the `r nb[[1]]` SNPs used in this paper (after filtering), **`r nb[[3]]` were genotyped in the Affymetrix assay**, **`r nb[[4]]` in the Infinium assay** and **`r nrow(df.noNAS)` were genotyped by both assays**.
 
+## How many clones genotyped in each assay?
+
 We want to know the same for the clones, i.e. how many clones were genotypes by each assay and by both.
 
 ```{r NumberClonesGenotypedAssays}
@@ -474,16 +479,14 @@ tab.clon <- data[4:nrow(data),1:2] %>%
 
 # sapply(tab.clon, function(x) sum(is.na(x))) # (to check) No NAs, great .
 
-#tab.clon <- table(tab.clon$assay)
 table(tab.clon$assay)
 ```
 
-
-<!-- Among the `r ncol(df)` clones used in the present paper (after filtering), **`r tab.clon[[1]]` were genotyped in both the Affymetrix and Infinium assays** and **`r tab.clon[[2]]` clones were only genotyped by the Affymetrix assay**. -->
-
 All clones were genotyped with both the Affymetrix and Infinium assays.
 
-We want the average number of missing data per tree:
+## Average and max number of missing data per clone
+
+Frequency of missing data per clone:
 
 ```{r MissingDataPerclone}
 tab <- df %>% 
@@ -495,23 +498,22 @@ tab <- df %>%
   arrange(desc(freq.NAs)) %>% 
   mutate(id=1:nrow(.))
 
-
+# Visualization
 plot(tab$id,tab$freq.NAs,
      pch=20,
      xlab="Clone number",
      ylab="Percentage of missing data per clone")
-# 
-# CAR14     21.4   455
-# BAY13     21.5   456
-# OLO17     21.9   457
 
-tab[c(1:10,(nrow(tab)-5):nrow(tab)),] %>%
+# Table ordered in decreasing order
+# so clones with the highest frequencies of missing data are first
+tab[c(1:10),1:2] %>%
   kable() %>%  
   kable_styling(font_size=11,
                 bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
   
 ```
 
+The **maximum frequency of missing data per clone** is **`r round(max(tab$freq.NAs),2)`%** and the **average frequency of missing data per clone** is **`r round(mean(tab$freq.NAs),2)`%**.
 
 ```{r GenerateTableLatexSuppInfoNbClonesPerProv, echo=F, eval=F}
 # We generate a table for the Supplementary Information of the paper, with the number of clones (i.e. trees) per provenance:
@@ -520,8 +522,6 @@ tibble(Provenance=str_sub(colnames(df),1,3),clon=colnames(df)) %>%
   count(name="Nb.clones") %>% 
   kable("latex", booktabs=T) 
 ```
-
-
 
 # Imputation of missing data
 
@@ -549,7 +549,7 @@ sum(is.na(gen.imp)) # No NAs
 
 Using the most common genotype at each SNP within the main gene pool this genotype belong to.
 
-We load the dataset in which there is the proportion of belonging of each genotype to a given gene pool.
+We load the dataset in which there is the proportion of belonging of each genotype to a given gene pool [from @jaramillo2015molecular].
 
 ```{r LoadingPropAncestry}
 prop <- readRDS(file="data/PhenoEnvPopStructureDataset.RDS") %>% 
@@ -558,31 +558,32 @@ prop <- readRDS(file="data/PhenoEnvPopStructureDataset.RDS") %>%
   drop_na()
 ```
 
-We check whether some clones in the genomic dataset have no population structure data.
+We check whether some clones in the genomic dataset we want to use for the following analyses have no population structure data.
 
 ```{r IdentifyClonesNoPopStructure}
 setdiff(colnames(df),prop$clon)
 ```
 
-One clone, OLO17, has no structure data. If we look at the other clones of the OLO population, all mainly belong to the French Atlantic gene pool (`Q4`):
+This is ok, we know the proportion of membership to each gene pool for each clone we want to use in the following analyses! 
 
-```{r OLOclones}
+<!-- Comment: If we use the threshold of 20% missing data per clone, we would have seen that one selected clone (OLO17) has no population structure data. However, if we look at the other clones of the OLO population, all mainly belong to the French Atlantic gene pool (`Q4`): -->
+
+```{r OLOclones,echo=F}
 prop.OLO <- prop %>% dplyr::filter(prov == "OLO")
 
-prop.OLO %>% 
-  kable() %>%
-  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
-  column_spec(1, bold = T)
+# prop.OLO %>% 
+#   kable() %>%
+#   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+#   column_spec(1, bold = T)
 ```
 
-Among the `r nrow(prop.OLO)` clones of the OLO population, the proportion of belonging from the French Atlantic gene pool ranges from `r min(prop.OLO$Q4)` to `r max(prop.OLO$Q4)`. So there is a high probability that OLO17 also belong mainly from the French Atlantic gene pool. That's why we consider in the following analyses that OLO17 mainly belong from the French Atlantic gene pool.
-
-Comment: if the threshold of missing data per clone is 18% (or 15%), then we don't have to care about OLO17 as it is not included in the selected clones.
+<!-- Among the `r nrow(prop.OLO)` clones of the OLO population, the proportion of belonging from the French Atlantic gene pool ranges from `r min(prop.OLO$Q4)` to `r max(prop.OLO$Q4)`. So there is a high probability that OLO17 also belong mainly from the French Atlantic gene pool. That's why we consider in the following analyses that OLO17 mainly belong from the French Atlantic gene pool. -->
 
 ```{r MergePopStructureWithGenomicData}
 mainGP <- prop %>% dplyr::select(clon,max.Q) # extract the main gene pool for each clone.
 
-mainGP[nrow(mainGP) + 1,] <- c("OLO17","Q4") # we add the main  gene pool of OLO17
+# if threshold missing data per clone < 20%, we add the main  gene pool of OLO17
+if(threshold.NA.per.clone>18) mainGP[nrow(mainGP) + 1,] <- c("OLO17","Q4") 
 
 gen.imp <- df %>% 
   t() %>% 
@@ -606,7 +607,7 @@ sum(is.na(subset)) # 14,965 NAs in Q5 gene pool
 
 table(subset[,"snp_12238"]) # NAs of this SNP should take the value '2' after imputation.
 table(subset[,"snp_10182"]) # NAs of this SNP should take the value '1' after imputation.
-table(subset[,"snp_7628"]) # NAs of this SNP should take the value '2' after imputation.
+table(subset[,"snp_7628"])  # NAs of this SNP should take the value '2' after imputation.
 ```
 
 
@@ -630,7 +631,7 @@ sum(is.na(subset)) # 0 NAs now!
 
 table(subset[,"snp_12238"]) # great! (NAs of this SNP has taken the values '2' after imputation)
 table(subset[,"snp_10182"]) # great! (The missing value of this SNP has taken the value '1' after imputation)
-table(subset[,"snp_7628"]) # great! (The missing value of this SNP has taken the value '2' after imputation)
+table(subset[,"snp_7628"])  # great! (The missing value of this SNP has taken the value '2' after imputation)
 ```
 
 Formating the dataset (reattributing clone names, clones in columns and snp in rows, etc.):
@@ -674,3 +675,4 @@ write_csv(gen.imp.csv,
 ```
 
 
+# References
