@@ -55,6 +55,7 @@ library(psych)      # CRAN v1.8.12   to run RDA and to plot the pairs panels
 library(tidyverse)  # CRAN v1.3.0
 library(kableExtra) # CRAN v1.1.0
 library(raster)     # CRAN v3.3-13 
+library(ggbiplot)
 ```
 
 # Data munging
@@ -208,4 +209,44 @@ data %>%
   pairs.panels(scale=T,hist.col="palegreen1")
 ```
 
+Other visualizations:
+
+```{r PlotCorr,fig.height=7.3,fig.width=7.3}
+source("scripts/Functions/corpmat.R")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+
+PlotCors <- function(data,select.var,nbsize){
+  cor <- cor(data[,select.var])
+
+# matrix of the p-value of the correlation
+p.mat <- corpmat(cor)
+
+corrplot::corrplot(cor, method="color", col=col(200),  
+                   type="upper", order="hclust", 
+                   addCoef.col = "black", # Add coefficient of correlation
+                   tl.col="black", tl.srt=45, #Text label color and rotation
+                   # Combine with significance
+                   p.mat = p.mat, sig.level = 0.01, insig = "blank", 
+                   # hide correlation coefficient on the principal diagonal
+                   diag=FALSE,number.cex=nbsize)
+
+pca <- prcomp(data[,select.var], center = TRUE,scale. = TRUE)
+
+ggbiplot(pca,varname.size =4) +  ylim(-2.5, 2.5) +    xlim(-3, 3) +  
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(size=12))
+}
+
+data %>% 
+  dplyr::select(all_of(select.var)) %>% 
+  unique() %>% 
+  dplyr::rename(bio5="bio5WC_prov",
+                bio6="bio6WC_prov",
+                bio12="bio12WC_prov",
+                bio15="bio15WC_prov",
+                water_top="water_top_prov",
+                depth_roots="depth_roots_prov") %>% 
+  PlotCors(select.var = colnames(.),nbsize = 0.6)
+```
 
