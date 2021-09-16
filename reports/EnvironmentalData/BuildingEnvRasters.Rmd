@@ -134,9 +134,11 @@ writeRaster(stackall, filename="data/StacksEnvVars/Stack_CurrentClimate_Res30sec
 
 > Period: 2041-2060
 
-## SSP3-7.0 
+Predictions of future climate come from the nine global climate models (GCMs) available in WorldClim for the period 2041 to 2060 and the Shared-socio Economic Pathways (SSP) 370 and 585 (https://www.worldclim.org/data/cmip6/cmip6climate.html).
 
-We create stacks of environmental variables (future climate, topography & soil). Regarding the future climate, we use the predictions of the nine global climate models available in WorldClim for the period 2041 to 2060 and the Shared-socio Economic Pathway (SSP) 370 (https://www.worldclim.org/data/cmip6/cmip6climate.html).
+For each global climate model, we create a **stack of 8 environmental variables**: the 4 variables describing the future climate (`bio5`, `bio6`, `bio12` and `bio15`), the soil-related variables (`water_top` and `depth_roots`), the topographic rugedness index (`TRI`) and the burned area (`BurnedArea`).
+
+## SSP3-7.0 
 
 ```{r FutureClimateSSP370}
 rast.to.crop <- raster("data/StacksEnvVars/Stack_CurrentClimate_Res30seconds.grd")
@@ -192,6 +194,7 @@ for(i in GCMs){
 }
 ```
 
+
 ## SSP5-8.5
 
 ```{r FutureClimateSSP585}
@@ -244,6 +247,90 @@ for(i in GCMs){
   
 }
 ```
+
+ 
+## Averaging GCMs predictions
+
+We average the predictions of the nine (SSP3-7.0) or eight (SSP5-8.5) GCMs.
+
+
+```{r FunctionAveragingGCMs}
+# Function to average the predictions of the nine or eight GCMs
+
+AverageGCMs <- function(SSP){
+
+  path=paste0("data/StacksEnvVars/FutureClimate/2041to2060/",SSP,"/")
+  file.names <- list.files(path=path,pattern="*grd$")
+
+  # Create a stack with nine layers (each corresponding to one GCM),
+  # and in each layer, there is a stack with the 8 environmental variables
+  stack.GCMs <- lapply(file.names, function(t) stack(paste0(path,t)))
+
+  meanIgnoringZeroes <- function(x) {mean(x[x!=0],na.rm=T)}
+
+  if(SSP=="SSP370"){
+  AveragingClimGCMs <- function(clim.var,clim.stack){
+    mean.clim <- overlay(
+          clim.stack[[1]][[clim.var]],
+          clim.stack[[2]][[clim.var]],
+          clim.stack[[3]][[clim.var]],
+          clim.stack[[4]][[clim.var]],
+          clim.stack[[5]][[clim.var]],
+          clim.stack[[6]][[clim.var]],
+          clim.stack[[7]][[clim.var]],
+          clim.stack[[8]][[clim.var]],
+          clim.stack[[9]][[clim.var]],
+          fun=meanIgnoringZeroes)
+    return(mean.clim)
+    
+  }} else if(SSP=="SSP585"){
+    
+   AveragingClimGCMs <- function(clim.var,clim.stack){
+    mean.clim <- overlay(
+          clim.stack[[1]][[clim.var]],
+          clim.stack[[2]][[clim.var]],
+          clim.stack[[3]][[clim.var]],
+          clim.stack[[4]][[clim.var]],
+          clim.stack[[5]][[clim.var]],
+          clim.stack[[6]][[clim.var]],
+          clim.stack[[7]][[clim.var]],
+          clim.stack[[8]][[clim.var]],
+          fun=meanIgnoringZeroes)
+    return(mean.clim)
+  }   
+    }
+
+  avgbio5 <- AveragingClimGCMs(clim.var="bio5",clim.stack = stack.GCMs)
+  avgbio6 <- AveragingClimGCMs(clim.var="bio6",clim.stack = stack.GCMs)
+  avgbio12 <- AveragingClimGCMs(clim.var="bio12",clim.stack = stack.GCMs)
+  avgbio15 <- AveragingClimGCMs(clim.var="bio15",clim.stack = stack.GCMs)
+
+
+  stack.GCMs.avg <- stack(avgbio5,
+                          avgbio6,
+                          avgbio12,
+                          avgbio15,
+                          stack.GCMs[[1]][["water_top"]],
+                          stack.GCMs[[1]][["depth_roots"]],
+                          stack.GCMs[[1]][["TRI"]],
+                          stack.GCMs[[1]][["BurnedArea"]])
+
+  names(stack.GCMs.avg) <- c(clim.var,"water_top","depth_roots","TRI","BurnedArea")
+  
+  writeRaster(stack.GCMs.avg, 
+              filename=paste0("data/StacksEnvVars/FutureClimate/2041to2060/",SSP,"/StackGCMsAvg.grd"),
+              format="raster",
+              overwrite=TRUE)
+}
+```
+
+
+```{r ApplyAveragingGCMs}
+SSPs <- c("SSP370","SSP585")
+
+lapply(SSPs, AverageGCMs)
+```
+
 
 
 
