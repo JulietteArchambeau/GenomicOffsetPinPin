@@ -67,6 +67,18 @@ Climatic variables:
 clim.var <- c("bio5","bio6","bio12","bio15")
 ```
 
+```{r FunctionRemoveNAsStack}
+remove.NAs.stack<-function(rast.stack){
+  nom<-names(rast.stack)
+  test1<-calc(rast.stack, fun=sum)
+  test1[!is.na(test1)]<-1
+  test2<-rast.stack*test1
+  test2<-stack(test2)
+  names(test2)<-nom
+  return(test2)
+}
+```
+
 
 Load the mask of the maritime pine distribution (made with Euforgen data and the NFI plots)
 
@@ -75,7 +87,7 @@ PinpinDistri <- shapefile('data/maps/MaskPinpinDistri/PinpinDistriEUforgen_NFIpl
 plot(PinpinDistri)
 ```
 
-`r knitr::opts_chunk$set(eval = F)`
+
 
 # Current climate (res 30 seconds)
 
@@ -125,10 +137,12 @@ rast.BA <- mask(rast.BA,PinpinDistri,updatevalue=NA)
 
 # Merge and save the rasters in a stack
 # ------------------------------------
-stackall <- stack(rast.clim,rast.soil,rast.tri,rast.BA)
+stackall <- stack(rast.clim,rast.soil,rast.tri,rast.BA) # merge in a stack the different layers
+stackall <- remove.NAs.stack(stackall) # same cells with NAs in all layers
 stackall
 writeRaster(stackall, filename="data/StacksEnvVars/Stack_CurrentClimate_Res30seconds.grd", format="raster",overwrite=TRUE)
 ```
+
 
 # Future climate (res 2.5 minutes)
 
@@ -187,9 +201,12 @@ rast.BA <- mask(rast.BA,PinpinDistri,updatevalue=NA)
 for(i in GCMs){
   
   stackall <- stack(list.rast.GCMs[[i]],rast.soil,rast.tri,rast.BA)
+  stackall <- remove.NAs.stack(stackall) # same cells with NAs in all layers
   
   writeRaster(stackall, 
-              filename=paste0("data/StacksEnvVars/FutureClimate/2041to2060/SSP370/Stack_",str_remove_all(i,"-"),".grd"), format="raster",overwrite=TRUE)
+              filename=paste0("data/StacksEnvVars/FutureClimate/2041to2060/SSP370/Stack_",str_remove_all(i,"-"),".grd"),
+              format="raster",
+              overwrite=TRUE)
   
 }
 ```
@@ -241,6 +258,7 @@ rast.BA <- mask(rast.BA,PinpinDistri,updatevalue=NA)
 for(i in GCMs){
   
   stackall <- stack(list.rast.GCMs[[i]],rast.soil,rast.tri,rast.BA)
+  stackall <- remove.NAs.stack(stackall) # same cells with NAs in all layers
   
   writeRaster(stackall, 
               filename=paste0("data/StacksEnvVars/FutureClimate/2041to2060/SSP585/Stack_",str_remove_all(i,"-"),".grd"), format="raster",overwrite=TRUE)
@@ -384,6 +402,51 @@ rast.BA <- mask(rast.BA,PinpinDistri,updatevalue=NA)
 # Merge and save the rasters in a stack
 # ------------------------------------
 stackall <- stack(rast.clim,rast.soil,rast.tri,rast.BA)
+stackall <- remove.NAs.stack(stackall) # same cells with NAs in all layers
 stackall
 writeRaster(stackall, filename="data/StacksEnvVars/Stack_CurrentClimate_Res25minutes.grd", format="raster",overwrite=TRUE)
 ```
+
+# Adjusting missing values
+
+```{r AdjustingNAs}
+stackCurrClimRes25min <- stack("data/StacksEnvVars/Stack_CurrentClimate_Res25minutes.grd")
+stackFutClimSSP370 <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP370/StackGCMsAvg.grd")
+stackFutClimSSP585 <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP585/StackGCMsAvg.grd")
+
+stacks <- lapply(c(stackFutClimSSP370,stackFutClimSSP585), function(x){
+
+cellval.fut <- na.omit(as.data.frame(raster::extract(x[[1]], PinpinDistri,cellnumbers=T)))
+cellval.curr <- na.omit(as.data.frame(raster::extract(stackCurrClimRes25min[[1]], PinpinDistri,cellnumbers=T)))
+
+# 15 cells to replace by NAs in the stack of future climate
+cellval.fut[cellval.fut$cell %in% setdiff(cellval.fut$cell,cellval.curr$cell),]
+cell1  <- cellval.fut$cell[cellval.fut$cell %in% setdiff(cellval.fut$cell,cellval.curr$cell)]
+
+# 4 cells to replace by NAs in stackCurrClimRes25min
+cellval.curr[cellval.curr$cell %in% setdiff(cellval.curr$cell,cellval.fut$cell),]
+cell2 <- cellval.curr$cell[cellval.curr$cell %in% setdiff(cellval.curr$cell,cellval.fut$cell)]
+
+
+for(i in 1:8)  {x[[i]][c(cell1)] <- NA}
+for(i in 1:8)  {stackCurrClimRes25min[[i]][c(cell2)] <- NA}
+
+list(x,stackCurrClimRes25min)
+})
+
+
+writeRaster(stacks[[1]][[2]], filename="data/StacksEnvVars/Stack_CurrentClimate_Res25minutes.grd", 
+            format="raster",overwrite=TRUE)
+writeRaster(stacks[[1]][[1]], 
+              filename=paste0("data/StacksEnvVars/FutureClimate/2041to2060/SSP370/StackGCMsAvg.grd"),
+              format="raster",
+              overwrite=TRUE)
+writeRaster(stacks[[2]][[1]], 
+              filename=paste0("data/StacksEnvVars/FutureClimate/2041to2060/SSP585/StackGCMsAvg.grd"),
+              format="raster",
+              overwrite=TRUE)
+```
+
+
+
+`r knitr::opts_chunk$set(eval = F)`
