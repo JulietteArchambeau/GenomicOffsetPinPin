@@ -69,13 +69,14 @@ We used the genomic dataset in which there is missing data (i.e. no imputation o
 df <- readRDS(file="data/GenomicData/FormattedData/GenomicData_454clones_9817snps.rds")
 ```
 
+We use the sets of SNPs selected with the RDA and the standard covariate model of BayPass with the Important Sampling algorithm.
+
 ```{r LoadSNPsSets}
-snp.sets <- readRDS(file="outputs/ListSetsSNPs.rds")
+which.BayPass.selection <- "IS"
+snp.sets <- readRDS(file=paste0("outputs/ListSetsSNPs",which.BayPass.selection,".rds"))
 ```
 
-
-
-# Provenance allele frequencies for GF analyses
+# Population allele frequencies for GF
 
 ```{r CalculateAlleleFrequenciesForGF, eval=F}
 list.freq <- sapply(snp.sets, function(x){ 
@@ -100,12 +101,39 @@ saveRDS(list.freq,file="outputs/GF/ListAlleleFrequencies.rds")
 ```
 
 
-```{r VisualizeSubsetMatrix, eval=F}
+```{r VisualizeSubsetMatrix, eval=T}
+list.freq <- readRDS(file="outputs/GF/ListAlleleFrequencies.rds")
+
 list.freq[[1]][1:34,1:20] %>%
   kable(digits=3) %>%  
   kable_styling(font_size = 11,bootstrap_options = c("stripped","hover", "condensed"), full_width = F) %>%
   column_spec(1, bold = T)
+
+nb.snps <- sapply(list.freq, function(x) ncol(x[,-1]))
 ```
+
+Recall: there are `r  nb.snps[[1]]` reference SNPs, `r  nb.snps[[2]]` merged SNPs, `r  nb.snps[[3]]` SNPs under expected strong selection and `r  nb.snps[[4]]` common SNPs.
+
+For the GF analysis, we have to remove the SNPs that are polymorphic in 5 or less than 5 populations.
+
+```{r RmMinorAlleleFrequencies}
+list.freq <- sapply(list.freq, function(mat){ 
+  
+  vec <- apply(mat[,-1],2,function(x) length(unique(x)))
+  vecsup <- vec[vec>5]
+  snps <- names(vecsup) # SNPs that are polymorphic in more than 5 populations
+  mat <- mat %>% dplyr::select(prov,all_of(snps))
+    
+}, USE.NAMES = TRUE,simplify=FALSE)
+
+
+nb.snps <- sapply(list.freq, function(x) ncol(x))
+
+saveRDS(list.freq,file="outputs/GF/ListAlleleFrequenciesMAF.rds")
+```
+
+Now, there are **`r  nb.snps[[1]]` reference SNPs**, **`r  nb.snps[[2]]` merged SNPs**, **`r  nb.snps[[3]]` SNPs under expected strong selection** and **`r  nb.snps[[4]]` common SNPs**.
+
 
 # Pairwise $F_{ST}$ for GDM
 
@@ -133,18 +161,14 @@ df[1:10,1:10] %>%
 
 To estimate the pairwise $F_{ST}$, we use the **Weir and Cockerham method**, with the function `pairwise.WCfst` of the `hierfstat` package. We could have used the function `gene.dist` (with the option `WC84`), as in [Gougherty et al. (2020)](https://www.biorxiv.org/content/10.1101/2020.02.28.961060v1.abstract). `gene.dist` keeps only the lower triangle of the $F_{ST}$ matrix, while `pairwise.WCfst` keeps the whole matrix.
 
+```{r CalculatePairwiseFstMatrices, eval=F}
 
-```{r CompatureFstMatrixRefSNPs,echo=F,eval=T}
-# To save time, we are going to calculate now the pairwise Fst matrix of reference SNPs
-
+# I first calculated the pairwise Fst matrix of reference SNPs
 fst <- df %>% pairwise.WCfst(diploid=TRUE)
+saveRDS(fst,file="outputs/GDM/FstMatrices/PairwiseFstReferenceSNPs.rds")
 
-saveRDS(list.fst,file="outputs/GDM/FstMatrices/PairwiseFstReferenceSNPs.rds")
-```
-
-
-```{r ComputePairwiseFstMatrices, eval=F}
-list.fst <- sapply(snp.sets, function(x){ 
+# I then calculated the pairwise Fst matrices of the candidate SNPs
+list.fst <- sapply(snp.sets[2:4], function(x){ 
   
   df %>% 
   dplyr::select(prov,all_of(x)) %>%
@@ -152,6 +176,13 @@ list.fst <- sapply(snp.sets, function(x){
     
 }, USE.NAMES = TRUE,simplify=FALSE)
 
+# Let's merge the two in a common list:
+ref.list <- list()
+ref.list[[1]] <- readRDS(file="outputs/GDM/FstMatrices/PairwiseFstReferenceSNPs.rds")
+names(ref.list) <- "Ref"
+list.fst <- c(ref.list, list.fst)
+
+# save it
 saveRDS(list.fst,file="outputs/GDM/FstMatrices/ListPairwiseFst.rds")
 ```
 
@@ -226,8 +257,6 @@ ScaledMatrices <- sapply(list.fst, function(x){
 
 
 sapply(ScaledMatrices, function(x){range(x,na.rm=T)}, USE.NAMES = TRUE,simplify=FALSE)
-
-saveRDS(ScaledMatrices,file="outputs/GDM/FstMatrices/ListPairwiseFstScaled.rds")
 ```
 
 ## Visualization
@@ -274,6 +303,24 @@ VizMatrix(ScaledMatrices[["Mid"]])
 
 ```{r VizPairwiseFstMatrixCom, fig.height=14, fig.width=14}
 VizMatrix(ScaledMatrices[["Com"]])
+```
+
+
+## Saving 
+
+Let's format for the `gdm` package: the distance matrix must have as the first column the names of the populations.
+
+```{r SavingForGDM}
+ScaledMatrices <- sapply(ScaledMatrices, function(x){
+  
+  x <- x %>% 
+    as.data.frame() %>% 
+    tibble::rownames_to_column("prov") 
+  
+}, USE.NAMES = TRUE,simplify=FALSE)
+
+
+saveRDS(ScaledMatrices,file="outputs/GDM/FstMatrices/ListPairwiseFstScaled.rds")
 ```
 
 
