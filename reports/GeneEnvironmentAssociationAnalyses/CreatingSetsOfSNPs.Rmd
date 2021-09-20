@@ -63,16 +63,6 @@ In this document, we create a list of three sets of SNPs that will be used to ca
 
   - the **merged candidates**: with *either* BF > 10dB in BayPass or SNP loadings > 3 sd cutoff in the RDA for the chosen set of covariates.
                 
-         
-```{r ListSNPs}
-snp.set.names <- c("Reference SNPs",
-                   "Merged candidates",
-                   "Candidates under expected strong selection",
-                   "Common candidates")
-```
-
-`r knitr::opts_chunk$set(eval = F)`
-
 
 # Load data
 
@@ -86,7 +76,8 @@ geno <- readRDS(file="data/GenomicData/FormattedData/GenomicData_454clones_9817s
 Load the Baypass candidates.
 
 ```{r LoadCandBayPass}
-candBaypass <- readRDS(file="outputs/CandidateSNPs/baypass/CandSNPsBayPass.rds")
+modelBayPass <- "MCMC" # "IS" or "MCMC"
+candBaypass <- readRDS(file=paste0("outputs/CandidateSNPs/baypass/CandSNPsBayPass",modelBayPass,".rds"))
 candBaypass  %>% 
   kable() %>% 
   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
@@ -102,7 +93,7 @@ candRDA <- readRDS(file="outputs/CandidateSNPs/rda/352CandSNPsRDA.rds")
 
 ```{r MergedCand}
 mergedcand <- candBaypass %>% 
-  filter(COVARIABLE %in% c("bio13","bio5","bio6","bio14","water_top","depth_roots","TRI","BurnedArea")) %>% 
+  filter(COVARIABLE %in% c("bio5","bio6","bio12","bio15","water_top","depth_roots","TRI","BurnedArea")) %>% 
   full_join(candRDA,by="snp")  %>% 
   select(snp,COVARIABLE,medianBF,medianBeta,loading,contains("bio"),water_top,depth_roots,BurnedArea,TRI) %>% 
   dplyr::rename(varBaypass=COVARIABLE,
@@ -121,26 +112,26 @@ mergedcand <- candBaypass %>%
 mergedcand %>% 
   kable() %>% 
   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
-
-
 ```
+
+There are **`r length(mergedcand$snp)` merged candidates.**
 
 # Candidates under expected strong selection
 
 ```{r CandSNPsUnderStrongSelection}
 highcand <- candBaypass %>% 
-  filter(COVARIABLE %in% c("bio13","bio5","bio6","bio14","water_top","depth_roots","TRI","BurnedArea")) %>% 
+  filter(COVARIABLE %in% c("bio5","bio6","bio12","bio15","water_top","depth_roots","TRI","BurnedArea")) %>% 
   full_join(candRDA,by="snp") %>% 
-  filter(abs(medianBeta) >0 |abs(bio13)>0.3 | abs(bio5)>0.3 | abs(bio6)>0.3 | abs(bio14)>0.3 | abs(water_top)>0.3 | abs(depth_roots)>0.3 | abs(BurnedArea)>0.3 | abs(TRI)>0.3) %>% 
+  filter(abs(medianBeta) >0 |abs(bio5)>0.3 | abs(bio6)>0.3 | abs(bio12)>0.3 | abs(bio15)>0.3 | abs(water_top)>0.3 | abs(depth_roots)>0.3 | abs(BurnedArea)>0.3 | abs(TRI)>0.3) %>% 
   select(snp,COVARIABLE,medianBF,medianBeta,loading,contains("bio"),water_top,depth_roots,BurnedArea,TRI) %>% 
   dplyr::rename(varBaypass=COVARIABLE,
          BF.Baypass=medianBF,
          beta.Baypass=medianBeta,
          loading.rda=loading,
-         beta.bio13.RDA=bio13,
          beta.bio5.RDA=bio5,
          beta.bio6.RDA=bio6,
-         beta.bio14.RDA=bio14,
+         beta.bio12.RDA=bio12,
+         beta.bio15.RDA=bio15,
          beta.water_top.RDA=water_top,
          beta.depth_roots.RDA=depth_roots,
          beta.BurnedArea.RDA=BurnedArea,
@@ -149,26 +140,27 @@ highcand <- candBaypass %>%
 highcand %>% 
   kable() %>% 
   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
-
-
 ```
+
+
+There are **`r length(highcand$snp)` candidates under expected strong selection**.
 
 # Common candidates
 
 
 ```{r ComCand}
 comcand <- candBaypass %>% 
-  filter(COVARIABLE %in% c("bio13","bio5","bio6","bio14","water_top","depth_roots","TRI","BurnedArea")) %>% 
+  filter(COVARIABLE %in% c("bio5","bio6","bio12","bio15","water_top","depth_roots","TRI","BurnedArea")) %>% 
   inner_join(candRDA,by="snp") %>% 
   select(snp,COVARIABLE,medianBF,medianBeta,loading,contains("bio"),water_top,depth_roots,BurnedArea,TRI) %>% 
   dplyr::rename(varBaypass=COVARIABLE,
          BF.Baypass=medianBF,
          beta.Baypass=medianBeta,
          loading.rda=loading,
-         beta.bio13.RDA=bio13,
          beta.bio5.RDA=bio5,
          beta.bio6.RDA=bio6,
-         beta.bio14.RDA=bio14,
+         beta.bio12.RDA=bio12,
+         beta.bio15.RDA=bio15,
          beta.water_top.RDA=water_top,
          beta.depth_roots.RDA=depth_roots,
          beta.BurnedArea.RDA=BurnedArea,
@@ -180,17 +172,18 @@ comcand %>%
 
 ```
 
+There are **`r length(comcand$snp)` candidates under expected strong selection**.
 
 # List of sets of SNPs
 
 ```{r CreatingListSnpSets}
 snp.sets <- list(rownames(geno), # Reference SNPs
-                 rownames(geno), # Merged candidates
-                 rownames(geno), # Candidates under expected strong selection
-                 rownames(geno)) # Common candidates
+                 mergedcand$snp, # Merged candidates
+                 highcand$snp,   # Candidates under expected strong selection
+                 comcand$snp)    # Common candidates
 
 names(snp.sets) <- c("Ref","Mer","Mid","Com")
- saveRDS(snp.sets,file="outputs/ListSetsSNPs.rds")
-names(snp.sets) <- snp.set.names
+saveRDS(snp.sets,file=paste0("outputs/ListSetsSNPs",modelBayPass,".rds"))
 ```
 
+`r knitr::opts_chunk$set(eval = F)`
