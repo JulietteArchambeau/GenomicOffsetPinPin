@@ -1,0 +1,523 @@
+---
+title: "Calculating genomic offset"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=TRUE,cache.lazy = FALSE)
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)
+library(hierfstat)
+library(reshape2)
+library(ggbiplot)
+library(gdm)
+library(adespatial) # to calculate the Moran eigen vectors
+library(beepr)
+library(dplyr)
+library(tidyverse)
+library(gradientForest)
+library(raster)
+library(sgdm)
+library(rgeos)
+library(kableExtra)
+```
+
+```{r FuntionsOptionsUsed,echo=F}
+# Gray scale
+grayscale_colors <- gray.colors(100,            # number of different color levels
+                                start = 0.0,    # how black (0) to go
+                                end = 1.0,      # how white (1) to go
+                                gamma = 2.2,    # correction between how a digital
+                                # camera sees the world and how human eyes see it
+                                alpha = NULL)
+```
+
+# Load and preparing data
+
+## Mapping
+
+For the maps, we need:
+
+  - the maritime pine distribution that we will use as a mask in the maps.
+  
+  - and hillshade for the background.
+
+```{r LoadMapping}
+PinpinDistri  <- shapefile('data/maps/MaskPinpinDistri/PinpinDistriEUforgen_NFIplotsBuffer10km.shp')
+background <- raster("data/maps/Hillshade/background.grd")
+```
+
+
+## Environmntal data
+
+We load the environmental data:
+
+  - a raster of environmental variables with **current** climate and with **resolution ~ 1 km2** (30arc sec) (0.93 x 0.93 = 0.86 km2 at the equator), named: `stackCurrClimRes30sec`.
+  
+  - a raster of environmental variables with **current** climate and with **resolution ~ 30.869 km2** (2.5 minutes) (5.556 x 5.556 at the equator), named: `stackCurrClimRes25min`.
+  
+  - a raster of environmental variables with **future** climate under scenario **SSP3-7.0** and with **resolution ~ 30.869 km2** (2.5 minutes), named: `stackFutClimSSP370`.
+    
+  - a raster of environmental variables with **future** climate under scenario **SSP5-8.5** and with **resolution ~ 30.869 km2** (2.5 minutes), named: `stackFutClimSSP585`.
+  
+  -  a dataset with the values of the environmental variables for each population (i.e. provenance), named `env`.
+  
+
+```{r LoadEnvData}
+# Selected environmnental variables:
+select.var <- c("bio5","bio6","bio12","bio15","water_top","depth_roots","TRI", "BurnedArea")
+
+
+# Rasters of environmental variables
+# ----------------------------------
+
+stackCurrClimRes30sec <- stack("data/StacksEnvVars/Stack_CurrentClimate_Res30seconds.grd")
+stackCurrClimRes25min <- stack("data/StacksEnvVars/Stack_CurrentClimate_Res25minutes.grd")
+
+stackFutClimSSP370 <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP370/StackGCMsAvg.grd")
+stackFutClimSSP585 <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP585/StackGCMsAvg.grd")
+
+
+
+# Dataset with the value of the env variables for each population
+# ---------------------------------------------------------------
+env <- readRDS(file="data/PhenoEnvPopStructureDataset.RDS") %>% 
+  dplyr::rename(bio5="bio5WC_prov",
+                bio6="bio6WC_prov",
+                bio12="bio12WC_prov",
+                bio15="bio15WC_prov",
+                water_top="water_top_prov",
+                depth_roots="depth_roots_prov",
+                latitude="latitude_prov",
+                longitude="longitude_prov") %>% 
+  dplyr::select(prov,latitude,longitude,all_of(select.var)) %>% 
+  unique() %>% 
+  as_tibble()
+
+env %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+## Genomic data
+
+We load the genomic data:
+
+  -  a list of four (one for each set of SNPs) **pairwise $F_{ST}$ matrices** for the **GDM analyses**, named: `ListPairwiseFstScaled`.
+  
+  -  a list of four (one for each set of SNPs) tables of **population allele frequencies** for the **GF analyses**, named: `ListAlleleFrequencies`.
+  
+```{r Load GenomicData}
+snp.sets.codes <- c("Ref","Mer","Mid","Com")
+snp.sets.names <- c("Reference SNPs","Merged candidates","Candidates under expected strong selection","Common candidates")
+
+# List of pairwise Fst matrices scaled between 0 and 1
+ListPairwiseFstScaled <- readRDS(file="outputs/GDM/FstMatrices/ListPairwiseFstScaled.rds")
+
+# List of tables of population allele frequencies
+ListAlleleFrequencies <- readRDS(file="outputs/GF/ListAlleleFrequenciesMAF.rds")
+```
+
+
+## Moran's eigenvectors
+
+In the GF models, we use **Moran's eigenvectors as proxies of the genetic population structure**. 
+
+From Fitzpatrick & Keller: "For GF, which cannot directly accommodate spatial effects, we attempted to account for the influence of spatial processes and unmeasured environmental variation using **Moran’s eigenvector map** (MEM) variables (Borcard & Legendre 2002; Dray et al. 2006). Briefly, MEM variables are the **eigenvectors of a spatial weighting matrix derived from the geographic coordinates of sampling locations**. The resulting **uncorrelated** spatial eigenfunctions can be used to model geographic structure in genetic patterns across a range of spatial scales. Following previous applications, we used the **first half of the MEM eigenfunctions with positive eigenvalues** (four in our case), which have been claimed to model broad-scale spatial genetic variation generated by processes such as demographic history and, more likely, unaccounted for environmental variation (Manel et al. 2010b, 2012; Sork et al. 2013). This approach has analogies to the use of latent factors to account for unobserved sources of genetic variation when testing gene–environment associations (Frichot et al. 2013), and given that MEMs may actually reflect unmeasured environmental patterns rather than true isolation-by-distance, they should be implemented and interpreted with caution."
+
+In this email, Fizpatrick write: "How to deal with spatial structure in GF is an ongoing challenge. In the Ecology Letters paper we proposed MEMs, but we haven't really used those much since because they are hard to interpret and tend to be correlated with the climate gradients."
+
+In our case, **there are four MEM eigenfunctions with positive eigenvalues, we select the four.**
+
+
+```{r MoranEigenVectors}
+mem <- dbmem(env[,c("latitude","longitude")]) 
+
+# Merge data and MEM
+mem <- bind_cols(env[,c("prov","latitude","longitude")],mem)
+mem %>%
+  knitr::kable(digits = 3) %>%
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+# GDM
+
+```{r FunctionGDM}
+# res = "30sec" or "25min"
+# time = "Current" or "Future"
+
+ProjectingGeneticComposition <- function(env.rast,model,res,time,scenario){
+  
+# Create a raster of the genetic importance of each environmental and geographical variable
+rastTrans <- gdm.transform(model, env.rast)
+
+# Extract the values from the raster
+rastDat <- na.omit(getValues(rastTrans))
+
+# We may want to keep only the environmental variables, in this case, run the following line:
+rastDat <- rastDat[,3:ncol(rastDat)]
+
+# Principal Components Analysis (PCA) to reduce the transformed environmental variables into three factors
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE)
+
+# assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1 
+
+# scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+# assigns color to raster
+rast1 <- rast2 <- rast3 <- env.rast[[1]]
+
+rasValue <- raster::extract(env.rast, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+
+# stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+
+# Map of the projected current genetic composition
+pdf(paste0("outputs/GDM/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],".pdf"))
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main=snp.sets.names[[counter]])
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+dev.off()
+
+# Create the PCA of the importance of the environmental variables
+pdf(paste0("outputs/GDM/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],".pdf"))
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
+     main=snp.sets.names[[counter]])
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+dev.off()
+}
+
+
+ 
+```
+
+
+```{r GDM}
+counter <- 0
+
+GDM.outputs <- lapply(ListPairwiseFstScaled, function(x){
+  
+counter <<- counter + 1 
+
+
+# Format for gdm
+gdmTab <- formatsitepair(x, 
+                         bioFormat=3, 
+                         XColumn="longitude", 
+                         YColumn="latitude",
+                         siteColumn="prov",
+                         predData=env)
+
+# Running the GDM model:
+gdm.mod <- gdm(gdmTab, geo=T)
+
+# Deviance explained 
+perf <- data.frame(ExpDev=gdm.mod$explained)
+
+
+# sum(gdm.mod$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
+# if sum = 0: The algorithm was unable to fit a model to your data. The sum of the spline coefficients = 0 and deviance explained = NULL. Returning NULL object.
+
+
+# Cross validation
+# ----------------
+
+# Cross-validation with 9 folds
+repeat{
+  result <- tryCatch(sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T),warning = function(w) w )
+  if (inherits(result,"warning")) next  # For warnings - continue the next iteration
+  if (inherits(result,"error")) next  # For warnings - continue the next iteration
+  else break( result )                   # If no warnings - stop
+}
+perf[,"CV9"] <- result
+
+
+# Cross-validation with 6 folds
+repeat{
+  result <- tryCatch(sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T),warning = function(w) w )
+  if (inherits(result,"warning")) next  # For warnings - continue the next iteration
+  if (inherits(result,"error")) next  # For warnings - continue the next iteration
+  else break( result )                   # If no warnings - stop
+}
+perf[,"CV6"] <- result
+
+
+# Cross-validation with 2 folds
+repeat{
+  result <- tryCatch(sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T),warning = function(w) w )
+  if (inherits(result,"warning")) next  # For warnings - continue the next iteration
+  if (inherits(result,"error")) next  # For warnings - continue the next iteration
+  else break( result )                   # If no warnings - stop
+}
+perf[,"CV2"] <- result
+
+
+## Fitting the I-splines
+
+#From @fitzpatrick2016using, "The maximum height of each spline indicates the magnitude of total biological change along that gradient and thereby corresponds to the relative importance of that predictor in contributing to biological turnover while holding all other variables constant (i.e., is a partial ecological [genetic] distance)."
+
+gdm.mod.pred <- predict.gdm(gdm.mod, gdmTab)
+
+pdf(paste0("outputs/GDM/ModelRuns/Figs/ObsPred_",snp.sets.codes[[counter]],".pdf"))
+plot(gdmTab$distance, gdm.mod.pred, 
+     xlab="Observed genetic distance",
+     ylab="Predicted genetic distance", 
+     main=snp.sets.names[[counter]],
+     pch=20, col=rgb(0,0,1,0.5))
+lines(c(-1,2), c(-1,2))
+dev.off() 
+
+# I-splines
+pdf(paste0("outputs/GDM/ModelRuns/Figs/Splines_",snp.sets.codes[[counter]],".pdf"))
+layout(matrix(1:9,3,3))
+gdm.mod.splineDat <- isplineExtract(gdm.mod)
+
+
+plot(gdm.mod.splineDat$x[,"Geographic"], 
+     gdm.mod.splineDat$y[,"Geographic"], 
+     lwd=3,type="l", 
+     xlab="Geographic distance", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9)) # or ylab= f(Geographic distance)
+
+plot(gdm.mod.splineDat[[1]][,"bio5"], 
+     gdm.mod.splineDat[[2]][,"bio5"], 
+     type="l",
+     lwd=3, 
+     xlab="Max T warmest month (C°)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.mod.splineDat[[1]][,"bio6"], 
+     gdm.mod.splineDat[[2]][,"bio6"], 
+     type="l",
+     lwd=3, 
+     xlab="Min T coldest month (C°)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.mod.splineDat[[1]][,"bio12"], 
+     gdm.mod.splineDat[[2]][,"bio12"], 
+     type="l",
+     lwd=3, 
+     xlab="Annual precipitation (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.mod.splineDat[[1]][,"bio15"], 
+     gdm.mod.splineDat[[2]][,"bio15"], 
+     type="l",
+     lwd=3, 
+     xlab="Prec seasonality (coeff of variation)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.mod.splineDat[[1]][,"water_top"], 
+     gdm.mod.splineDat[[2]][,"water_top"], 
+     type="l",
+     lwd=3, 
+     xlab="Total available water content (mm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.mod.splineDat[[1]][,"depth_roots"], 
+     gdm.mod.splineDat[[2]][,"depth_roots"], 
+     type="l",
+     lwd=3, 
+     xlab="Depth available to roots (cm)", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.mod.splineDat[[1]][,"TRI"], 
+     gdm.mod.splineDat[[2]][,"TRI"], 
+     type="l",
+     lwd=3, 
+     xlab="Topographic Ruggedness Index", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+
+plot(gdm.mod.splineDat[[1]][,"BurnedArea"], 
+     gdm.mod.splineDat[[2]][,"BurnedArea"], 
+     type="l",
+     lwd=3, 
+     xlab="Burned area", 
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+dev.off() 
+
+
+# Variable relative importance
+
+# In their article, Fitzpatrick & Keller say "To estimate relative importance of variables for GDM, we rescaled the maximum value of the fitted I-Splines between 0 and 1, which is proportional to variable importance."
+
+# Let's calculate the variable relative importance:
+
+# relative importance of the covariates
+apply(gdm.mod.splineDat$y,2,max)
+
+# scaled relative importance of the covariates
+maxImp <- max(gdm.mod.splineDat$y)
+RelVarImp <- gdm.mod.splineDat$y / maxImp
+RelVarImp <- apply(RelVarImp,2,max)
+
+# varimpgdm <- data.frame(relimp=apply(RelVarImp,2,max)) %>% 
+#   rownames_to_column(var="covariate") %>% 
+#   mutate(CovSet="AvgSand",SnpSet="Reference")
+
+
+
+
+## Projection under the current climate
+# -------------------------------------
+ProjectingGeneticComposition(env.rast=stackCurrClimRes30sec,
+                             model=gdm.mod,
+                             res="30sec",
+                             time="Current",
+                             scenario="")
+
+## Projection under the future climate
+# -------------------------------------
+ProjectingGeneticComposition(env.rast=stackFutClimSSP370,
+                             model=gdm.mod,
+                             res="25min",
+                             time="Future",
+                             scenario="SSP370")
+
+ProjectingGeneticComposition(env.rast=stackFutClimSSP585,
+                             model=gdm.mod,
+                             res="25min",
+                             time="Future",
+                             scenario="SSP585")
+
+
+# Genomic offset
+# --------------
+GOAcrossRangeWithGDM <- function(x){
+  
+  rast.pred <- predict.gdm(gdm.mod, stackCurrClimRes25min,time=TRUE, predRasts=x) 
+  rasValue <- raster::extract(rast.pred, PinpinDistri,cellnumbers=T)
+  rasValue <- as.data.frame(rasValue)
+  rasValue <- na.omit(rasValue)
+  return(rasValue$value)
+
+}
+
+GO <- lapply(c(stackFutClimSSP370,stackFutClimSSP585), GOAcrossRangeWithGDM)
+names(GO) <- c("SSP370","SSP585")
+
+# convert to DF 
+dfGO <- as.data.frame(GO)
+
+# Distribution of the genomic offset for each GCM
+dfGO %>%  
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
+  ggplot(aes(x=go,color=model)) + 
+    geom_density(size=1.5) +
+    theme_bw() + 
+    xlab("Genomic offset")
+
+
+rast.go <- stackFutClimSSP370[[1]]
+rasValue <- raster::extract(rast.go, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+lapply(c("SSP370","SSP585"), function(x){
+  
+  rast.go[rasValue$cell] <- dfGO[,x]
+# plot(rast.go,box = FALSE,
+#      axes = FALSE,
+#      alpha=0.8,
+#       col=colorRampPalette(c("blue","yellow","red"))(255),
+#      zlim=c(0,0.1))
+
+pdf(paste0("outputs/GDM/GenomicOffset/MapGenomicOffset_",x,"_",snp.sets.codes[[counter]],".pdf"))
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,
+     main=paste0("Genomic offset - ",x))
+plot(rast.go,box = FALSE,
+     axes = FALSE,
+     #alpha=0.8,
+      col=colorRampPalette(c("blue","yellow","red"))(255),
+     #zlim=c(0,0.1),
+     add=T,
+     bgalpha=0)
+dev.off()  
+})
+outputs <- list(perf,gdm.mod,gdm.mod.pred,gdm.mod.splineDat,RelVarImp)
+})
+```
+
+
+
+
