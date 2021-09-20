@@ -91,21 +91,22 @@ gen.imp <- gen.imp %>%
 
 Here the set of environmental covariates we use in this paper (see report `reports/EnvironmentalData/BuilingEnvPhenoPopStructureDataset.Rmd`):
 
-Burned area: `BurnedArea`.
+
+Burned area: `BurnedArea`: the  average of the monthly burned area from June 1995 to December 2014 (hectares).
 
 Topographic variable:`TRI`: topographic ruggedness index
 
 Soil variables:
 
-  - `water_top` = Total available water content
-  - `depth_roots` = Depth available to roots
+  - `water_top` = the total available water content (mm)
+  - `depth_roots` = depth available to roots (cm)
 
-Climatic variables representing episodic events:
+Climatic variables:
 
   - `bio5`: max temperature of the warmest month (°C)
   - `bio6`: min temperature of the coldest month (°C)
   - `bio12`: annual precipitation (mm)
-  - `bio15`: precipitation Seasonality (Coefficient of Variation) = standard deviation of weekly or monthly precipitation values as a percentage of the mean of those values. 
+  - `bio15`: precipitation seasonality (coefficient of variation) = standard deviation of weekly or monthly precipitation values as a percentage of the mean of those values. 
 
 ```{r SelectedEnvVariables}
 # Names  of the environmental variables of interest in the dataset:
