@@ -176,7 +176,7 @@ In our case, **there are four MEM eigenfunctions with positive eigenvalues, we s
 
 
 ```{r MoranEigenVectors}
-mem <- dbmem(env[,c("latitude","longitude")]) 
+mem <- dbmem(env[,c("latitude","longitude")]) # the order of longitude and latitude does not matter
 
 # Merge data and MEM
 mem <- bind_cols(env[,c("prov","latitude","longitude")],mem)
