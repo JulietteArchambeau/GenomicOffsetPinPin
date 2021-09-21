@@ -1,0 +1,308 @@
+---
+title: "Validation with mortality data from National Forest Inventories"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: kable
+    highlight: textmate
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+editor_options:
+  chunk_output_type: console
+always_allow_html: true
+bibliography: references.bib 
+---
+
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=F)
+options(width = 300)
+library(knitr)
+library(kableExtra)
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(latex2exp)
+library(cowplot)
+library(cowplot)
+library(tidybayes)
+library(rstan)
+library(brms)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+library(bayesplot)
+color_scheme_set("green")
+library(broom)
+library(lme4)
+library(raster)
+library(leaflet)
+```
+
+```{r CredibleIntervalsUsed, echo=F}
+# The credible intervals used are 95% CI.
+prob=0.95
+probs <- c((1 - prob) / 2, 1 - (1 - prob) / 2)
+prob_outer = 1
+```
+
+```{r MapOptions,echo=F}
+tilesURL <- "http://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+
+basemap <- leaflet(width = "100%", height = "400px") %>%
+  addTiles(tilesURL)
+
+## Make vector of colors for values larger than 0 (180 colors)
+rc <- colorRampPalette(colors = c("red","orange","blue"), space = "Lab")(180)
+rcinv <- colorRampPalette(colors = c("blue","orange","red"), space = "Lab")(180)
+```
+
+
+In this document, following @capblancq2020genomic, we aimed "to validate the relationship between genetic offset and the predicted decrease in fitness (assumption c) to evaluate whether the model is indeed informative in the face of demographic complexity (i.e., the effects of other processes on spatial variance in allele frequencies, such as expansion history and gene flow) as well as the genetic architecture of climate adaptation (polygenic trait architectures, G×E interactions, nonadditive genetic variance).
+
+For that, in this document, we want to associate the estimated genomic offset with a potential decrease in fitness in the maritime pine natural populations. We use mortality data from the French and Spanish National Forest Inventories (NFI) harmonized in @changenet2021occurrence. The French data relies on temporary plots sampled between 2005 and 2014 while the Spanish data relies on permanent plots sampled during the second (from 1986 to 1996) and third NFIs (from 1997 to 2008). A tree was recorded as dead if its death was dated at less than 5 years ago in the French NFI or if it was alive in the second inventory but dead in the third one in the Spanish NFI. 
+
+In order to account for the different census intervals between inventories, we modeled the proportion $p_{i}$ of maritime pines that died in the plot $i$ during the census interval with the complementary log-log link and an offset on the logarithm of the census interval $\Delta_{i}$ for the plot i, as follows:
+
+\begin{align*}
+m_{i} &\sim \text{Binomial}(N_{i},p_{i})\\
+\text{log}(-\text{log}(1-p_{i})) &=   \beta_{0,c} +  \beta_{C,c}C_{i} + \beta_{GO,c}GO_{i} + \text{log}(\Delta_{i}) \\
+\end{align*}
+
+with $N_{i}$ the total number of maritime pines in the plot $i$, $m_{i}$ the number of maritime pines that died during the census interval $\Delta_{i}$ in the plot $i$, $C_{i}$ the basal area of all tree species confounded in the plot $i$ (to account for the competition between trees) and $GO_{i}$ the estimated genomic offset in the plot $i$. As the French and Spanish inventories present noticeable methodological differences that may bias the estimations, we estimated country-specific coefficients: the country-specific intercepts $\beta_{0,c}$ and the country-specific slopes $\beta_{C,c}$ and $\beta_{GO,c}$.
+
+This model will be performed for the genomic offset estimated with both the GDM and GF methods, for each set of SNPs (four sets) and each scenario of future climate (two scenarios), therefore leading to 16 models runs.
+
+```{r CompileModel, cache=T,message=F,warning=F}
+stancode = stan_model("scripts/StanModels/BinomialCloglogMortalityNFI/BinomialCloglogMortalityNFI.stan")
+print(stancode)
+```
+
+# Loading and formatting NFI data
+
+We load the NFI data harmonized in @changenet2021occurrence.
+
+```{r LoadDataNFI}
+data <- readRDS(file="data/IFN/alexdata/dfplotPINPINA0.8R.M.rds") # 12610 obs of 337 variables
+data <- droplevels(data)
+```
+
+Variables we are interested in:
+
+  - The number of dead trees in the plot: `NbDead` (previously `treeNbrJ.M` in Alexandre's dataset).
+  - The total number of trees in the plot: `NbTot` (previously `treeNbrJ.IMall` in Alexandre's dataset).
+  - The number of years between surveys: `NbYears`  (previously `yearsbetweensurveys` in Alexandre's dataset).
+  - The basal area of all tree species in the plot (proxy of the competition among trees): `BasalArea` (previously `BA.ha.plot.1` in Alexandre's dataset).
+  - The number of years between surveys: `NbYears` (`yearsbetweensurveys` in Alexandre' dataset).
+  - The dates of the first and second survey: `surveydate1` and `surveydate2`.
+
+```{r FormatData,message=F,warning=F}
+data <- data %>% 
+  dplyr::select(plotcode,
+                longitude,
+                latitude,
+                country,
+                yearsbetweensurveys,
+                surveydate1,
+                surveydate2,
+                surveydate,
+                treeNbrJ.M,
+                treeNbrJ.IMall,
+                BA.ha.plot.1) %>% 
+  dplyr::rename(NbYears=yearsbetweensurveys,
+                NbDead=treeNbrJ.M,
+                NbTot=treeNbrJ.IMall,
+                BasalArea=BA.ha.plot.1) %>% 
+  mutate(PropDead=NbDead/NbTot,                 # proportion of dead trees
+         AnnualPropDead=(NbDead/NbTot)/NbYears) # annual proportion of dead trees
+```
+
+There are `r dim(data)[[1]]` plots.
+
+> Missing data
+
+```{r LookAtMissingData}
+sapply(data, function(x) sum(is.na(x)))
+```
+
+  - `r sapply(data, function(x) sum(is.na(x)))[["BasalArea"]]` missing data for the total basal area in the plots, so we are going to remove these plots. 
+
+  - `r sapply(data, function(x) sum(is.na(x)))[["PropDead"]]` missing data from the proportion of dead trees.
+
+```{r NAprop}
+naprop <- data[is.na(data$PropDead),] # keep only the missing data for the proportion of dead trees
+# length(naprop$plotcode) # 664 missing data
+
+# We look at the number of unique values for the total number of maritime pines in these plots and the total number of dead trees
+cat("Unique values of NbTot: ", unique(naprop$NbTot),
+    "\nUnique values of NbDead: ",unique(naprop$NbDead))
+```
+
+The `r sapply(data, function(x) sum(is.na(x)))[["PropDead"]]` missing data for `PropDead` are plots that have the value `0` for both `NbTot` and `NbDead`: let's remove them.
+
+```{r CleaningData}
+data <- data[!is.na(data$PropDead),]  # removing plots where there are no maritime pine
+data <- data[!is.na(data$BasalArea),] # removing plots where there is no information on the basal area
+```
+
+Now, there are `r dim(data)[[1]]` plots.
+
+
+# Running the models
+
+```{r RunModels,eval=F}
+# Load the 16 genomic offset estimates in a list
+# ----------------------------------------------
+
+# load the genomic offset calculated with the GDM approach
+gdm.go <- list.files("outputs/GDM/ExtractedGenomicOffsetNFI/", full.names=TRUE) %>% 
+  sapply(readRDS, USE.NAMES = TRUE,simplify=FALSE)
+names(gdm.go) <- paste0(str_sub(names(gdm.go),46,-5),"_GDM")
+
+# load the genomic offset calculated with the GF approach
+gf.go <- list.files("outputs/GF/ExtractedGenomicOffsetNFI/", full.names=TRUE) %>% 
+  sapply(readRDS, USE.NAMES = TRUE,simplify=FALSE)
+names(gf.go) <- paste0(str_sub(names(gf.go),45,-5),"_GF")
+
+# Merge the two lists
+list.go <- c(gdm.go, gf.go)
+
+
+# Run the 16 models
+# -----------------
+counter <- 0
+
+DF.go <- sapply(list.go,function(x){
+  counter <<- counter + 1 
+  
+  df <- inner_join(data,x,by=c("plotcode","longitude","latitude","NbTot")) %>% 
+  drop_na(GO) # we keep only plots where we have estimations of the genomic offset
+  
+  stanlist <- list(N=length(df$plotcode),
+                   NbDead=df$NbDead,
+                   NbTot=df$NbTot,
+                   logNbYears=log(df$NbYears),
+                   ncountry=length(unique(df$country)),
+                   country=as.numeric(df$country),
+                   GO=(df$GO-mean(df$GO))/sd(df$GO),
+                   C=(df$BasalArea-mean(df$BasalArea))/sd(df$BasalArea))
+  
+  # Running the model
+  mstan <- sampling(stancode, data = stanlist, iter = 2000, chains = 4, cores = 4,init=0) 
+
+  p <- mstan %>%  
+    mcmc_areas(regex_pars = "beta", # "beta|alpha"
+                        prob=prob,
+                        prob_outer=prob_outer,
+                        point_est = "median") +  
+    theme_bw() + 
+    scale_y_discrete(labels=c("betaGO_country[1]"=parse(text=TeX("$\\beta_{GO,Spain}$")),
+                              "betaGO_country[2]"=parse(text=TeX("$\\beta_{GO,France}$")),
+                              'betaC_country[1]'=parse(text = TeX("$\\beta_{C,Spain}$")),
+                              'betaC_country[2]'=parse(text = TeX("$\\beta_{C,France}$")),
+                              "alpha_country[1]"=parse(text = TeX("$\\beta_{0,Spain}$")),
+                              "alpha_country[2]"=parse(text = TeX("$\\beta_{0,France}$")))) +
+    ggtitle(names(list.go)[[counter]]) +
+    theme(axis.text = element_text(size=16)) 
+  
+  ggsave(p,file=paste0("outputs/ValidationNFI/Figs/MCMCareas_",names(list.go)[[counter]],".pdf"),device="pdf")
+  
+  
+  # Save coefficients
+  broom::tidyMCMC(mstan,droppars = NULL, estimate.method = "median", 
+                  ess = F, 
+                  rhat = F, 
+                  conf.int = T,
+                  conf.level = prob) %>% 
+  filter(str_detect(term, c('country')))
+
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="GenomicOffset")
+
+saveRDS(DF.go, file="outputs/ValidationNFI/OutputsModels.rds")
+```
+
+# Visualization
+
+```{r VisualizeCoeffGenomicOffset,fig.height=8,fig.width=10}
+DF.go <- readRDS(file="outputs/ValidationNFI/OutputsModels.rds")
+
+graphs <- lapply(c("betaGO_country[1]","betaGO_country[2]"), function(x){
+
+p <-  DF.go %>% 
+  filter(term==x) %>% 
+  mutate(Model=str_sub(GenomicOffset,12,-1),
+         Model=case_when(Model == "GDM" ~ "Generalised Dissimilarity Modeling",
+                         Model == "GF"  ~ "Gradient Forests"),
+         SNPSets=str_sub(GenomicOffset,8,10),
+         SNPSets=factor(SNPSets,levels=c("Com","Mid","Mer","Ref")),
+         Scenario=str_sub(GenomicOffset,1,6),
+         Scenario=case_when(Scenario=="SSP370" ~ "SSP3-7.0 (moderately alarming)",
+                             Scenario=="SSP585" ~ "SSP5-8.5 (strongly alarming)"))  %>%
+  
+  ggplot(aes(x = SNPSets, y = estimate,ymin = conf.low, ymax = conf.high,colour=Scenario,shape=Scenario)) +
+  geom_pointinterval(position = position_dodge(width = .6),point_size=2.5,size=2,show.legend = c(size = TRUE)) +
+  facet_grid(.~Model,scales="free", space = "free") + 
+  ylab(TeX("$\\beta_{GO}$ estimates")) + xlab("") +
+  scale_colour_manual(values=c("darkviolet","orange1")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=16),
+        axis.title = element_text(size=16),
+      legend.title=element_text(size=13), 
+      legend.text=element_text(size=10),
+      legend.position = c(.85, .83),
+      legend.background = element_rect(colour = "grey"),
+      strip.text.x = element_text(size = 14),
+      panel.grid.minor.x=element_blank(),
+      panel.grid.major.x=element_blank()) +
+    guides(color=guide_legend(ncol=1))
+  
+})
+
+
+graphs[[2]] <- graphs[[2]] + theme(legend.position = "none")
+
+grid.graphs <- plot_grid(graphs[[1]],graphs[[2]],nrow=2,labels=c("A)","B)"))
+ggsave(grid.graphs, file="figs/manuscript/ValidationNFI.pdf",device="pdf")
+grid.graphs 
+```
+
+# References
