@@ -126,6 +126,7 @@ list.freq <- sapply(list.freq, function(mat){
     
 }, USE.NAMES = TRUE,simplify=FALSE)
 
+# sapply(list.freq[[1]][,-1], function(x) length(unique(x))) %>% as.data.frame() %>% range() # it worked
 
 nb.snps <- sapply(list.freq, function(x) ncol(x))
 
