@@ -139,7 +139,7 @@ The variables included in the four sets of variables that we are going  to compa
 ```{r LoadEnvData}
 # We load the dataset with soil and climatic data:
 data <- readRDS(file="data/AllDataPhenoClimSoil.RDS")
-data <- data %>% select(prov,contains("ude_prov"),contains("WC"),contains("top_prov"),"depth_roots_prov")
+data <- data %>% dplyr::select(prov,contains("ude_prov"),contains("WC"),contains("top_prov"),"depth_roots_prov")
 colnames(data) <- c("prov",
                    str_sub(grep("ude_prov",colnames(data),value=TRUE),1,-6),
                    str_sub(grep("bio",colnames(data),value=TRUE),1,-8),
