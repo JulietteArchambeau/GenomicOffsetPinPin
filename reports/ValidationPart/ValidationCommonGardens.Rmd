@@ -1,0 +1,393 @@
+---
+title: "Validation in the common gardens"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+bibliography: references.bib
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)
+library(tidybayes)
+library(rstan)
+library(brms)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+library(bayesplot)
+color_scheme_set("green")
+library(reshape2)
+library(dplyr)
+library(tidyverse)
+library(latex2exp)
+library(kableExtra)
+```
+
+```{r CredibleIntervalsUsed, echo=F}
+# The credible intervals used are 95% CI.
+prob=0.95
+probs <- c((1 - prob) / 2, 1 - (1 - prob) / 2)
+prob_outer = 1
+```
+
+
+# Load CTD and genomic offset
+
+```{r ExtractGOandCTD}
+df <- lapply(c("GDM","GF"), function(x){
+  
+  df <- list.files(paste0("outputs/",x,"/ExtractedGenomicOffsetCG/"), full.names=TRUE) %>% 
+    sapply(readRDS, USE.NAMES = TRUE,simplify=FALSE)
+  names(df) <- str_sub(names(df),-7,-5)
+  df <- df %>% 
+    bind_rows(.id="SNPSets") %>% 
+    mutate(Model=x)
+  
+}) %>% 
+  bind_rows() %>% 
+  mutate(CTD.bio1=s1.bio1-s2.bio1,
+         CTD.bio5=s1.bio1-s2.bio5,
+         CTD.bio6=s1.bio1-s2.bio6,
+         CTD.bio12=s1.bio1-s2.bio12,
+         CTD.bio15=s1.bio1-s2.bio15) %>% 
+  pivot_wider(names_from=SNPSets,values_from = GO,names_prefix="GO.") %>% 
+  pivot_wider(names_from=Model,values_from = c(GO.Ref,GO.Mer,GO.Mid,GO.Com),names_sep = ".") %>% 
+  dplyr::select(-contains(c("s1.bio","s2.bio","depth","water","TRI","Burned","s1.x","s1.y"))) %>% 
+  dplyr::rename(site=s2.site,
+                prov=s1.prov)
+
+df %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1:2, bold = T)
+```
+
+
+
+# Mortality models
+
+In this section, we want to determine whether **genomic offset (GO)** or **climate transfer distances (CTD)** are associated with the **proportion of dead trees in the populations**, independantly in two common gardens located in Spain (next to Madrid and Caceres, respectively) and in which mortality rates were high. For that, we build a model that assumes that **tree height acts as a confounder**. Indeed, trees that were higher at the time of planting have a higher probability of survival. This is particularly true in Madrid and Caceres where there were an extreme drought event the same year the trees were planted. Here is the model:
+  
+\begin{align*} 
+a_{p} &\sim \text{Binomial} (N_{p},p_{p}) \\
+\text{logit}(p_{p}) &= \beta_{0} +  \beta_{H}H_{p} + \beta_{X1}X_{p} + \beta_{X2}X^{2}_{p} \\
+\end{align*}
+
+with $p_{p}$ the count of individual that died in the population $p$, $N_{g}$ the total number of individuals in the population $p$ (=number of individuals that were initially planted in the common garden), $X_{p}$ is the value of the variable of interest (GO or CTD) in the population $p$ and $H_{p}$ is the BLUPs for height of the population $p$ (calculated across all common gardens in the model 1 of [Archambeau et al. 2021](https://www.biorxiv.org/content/10.1101/2020.11.13.382515v1.abstract)). We use the BLUPs calculated across all common gardens because we showed in paper 1 that the population-by-site interaction was very small and so we neglect it. We included a quadratic term for $X_p$ to allow for potential nonlinearity in the response, following @fitzpatrick2021experimental.
+
+
+## Load the data
+
+### Height data
+
+We use here the provenance intercepts obtained in the model 1 of the first paper. 
+
+```{r ExtractBlockIntercepts,message=F,warning=F}
+HierMod <- readRDS(file="../../Pinpin_Clonapin/HeightPinpinClonapin/outputs/models/P1/MOD1.rds")
+heights <- HierMod %>% broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>% # we take the mean of the prov random intercepts
+  filter(str_detect(term, "^(r_prov\\[)")) %>% 
+  dplyr::rename(height=estimate,prov=term) %>% 
+  mutate(prov=str_sub(prov,8,-12))
+
+heights %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+### Survival data
+
+```{r LoadSurvData}
+data <- readRDS(file="data/ClonapinData/PhenoDataNovember2019_UpdatedSept2021_AllSites.rds")
+```
+
+```{r CheckIdentityDatasets, echoF, eval=F}
+data.annual <- readRDS(file="data/ClonapinData/PhenoDataNovember2019_AnnualTraits_UpdatedSept2021_AllSites.rds")
+
+TestIdentityDF <- function(sel.site,colum.site){
+vec.annual <- data.annual[data.annual$site==sel.site,] %>%
+    dplyr::select(prov,tree,all_of(colum.site)) %>%
+    drop_na() %>% 
+    arrange(tree)
+
+vec.long <- data[data$site==sel.site,] %>%
+    dplyr::select(prov,tree,survival) %>%
+    drop_na() %>% 
+    arrange(tree)
+
+return(identical(pull(vec.annual[,3]),
+                    vec.long$survival))
+}
+
+
+TestIdentityDF(sel.site= "caceres", colum.site ="CAC_survdec11")
+TestIdentityDF(sel.site= "madrid", colum.site ="MAD_survdec11")
+```
+
+
+
+
+## Run the models
+
+```{r CompileMortalityModel, cache=T,message=F,warning=F}
+stancode = stan_model("scripts/StanModels/BinomialMortalityModelCG.stan")
+print(stancode)
+```
+
+
+```{r RunMortalityModels, eval=F}
+DF <- sapply(c("caceres","madrid"),function(sel.site){
+  
+vars <- colnames(df)[str_detect(colnames(df),"CTD|GO")]
+
+counter <- 0
+
+DFint <- sapply(vars,function(x){
+
+  counter <<- counter + 1 
+  
+subdata <- data %>% 
+  filter(site==sel.site) %>% 
+  dplyr::select(prov,survival) %>% 
+  drop_na() %>% 
+  group_by(prov) %>% 
+  dplyr::summarise(dead.count=n()-sum(survival),tot.count=n())
+
+subdf <- df %>% 
+  filter(site==sel.site) %>% 
+  inner_join(heights[,c("prov","height")], by="prov") %>% 
+  inner_join(subdata, by="prov")
+
+  
+  X <- subdf[,x] %>% pull()
+
+  stanlist <- list(N=length(subdf$prov),
+                   NbDead=subdf$dead.count,
+                   NbTot=subdf$tot.count,
+                   H=(subdf$height-mean(subdf$height)/sd(subdf$height)),
+                   X=(X -mean(X)/sd(X)))
+
+  # Running the model
+  mstan <- sampling(stancode, data = stanlist, iter = 2000, chains = 4, cores = 4) 
+
+  p <- mstan %>%  
+    mcmc_areas(regex_pars = "beta", # "beta|alpha"
+                        prob=prob,
+                        prob_outer=prob_outer,
+                        point_est = "median") +  
+    theme_bw() + 
+    scale_y_discrete(labels=c("beta0"=parse(text=TeX("$\\beta_{0}$")),
+                              "betaH"=parse(text=TeX("$\\beta_{H}$")),
+                              'betaX1'=parse(text = TeX("$\\beta_{X1}$")),
+                              'betaX2'=parse(text = TeX("$\\beta_{X2}$")))) +
+    ggtitle(paste0(vars[[counter]]," - ", sel.site)) +
+    theme(axis.text = element_text(size=16)) 
+  
+  ggsave(p,file=paste0("outputs/ValidationCG/Figs/MortalityModels/MCMCareas_",vars[[counter]],"_",sel.site,".pdf"),device="pdf")
+  
+  
+  # Save coefficients
+  broom::tidyMCMC(mstan,
+                  droppars = NULL, 
+                  estimate.method = "median", 
+                  ess = F, 
+                  rhat = F, 
+                  conf.int = T,
+                  conf.level = prob) %>% 
+  filter(str_detect(term, c('beta')))
+
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="variable")
+  
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="site")
+
+saveRDS(DF,file="outputs/ValidationCG/TablesPosteriors/OutputsMortalityModels.rds")
+```
+
+```{r LookTablePosteriorsMortalityModels}
+DF <- readRDS(file="outputs/ValidationCG/TablesPosteriors/OutputsMortalityModels.rds")
+DF %>% 
+  print(n=Inf) %>%
+  knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F)
+```
+
+# Height models
+
+
+In this section, we want to determine whether **genomic offset (GO)** or **climate transfer distances (CTD)** are associated with the **mean height of the populations**, independantly in five common gardens located in Spain (Asturias, Madrid, Caceres), Portugal (near Fundao) and France (Pierroton). In each common garden $s$, we perfom the following model:
+  
+\begin{align*} 
+H_{p}  &\sim \mathcal{N}(\mu_{p},\sigma^{2}_{r}) \\
+\mu_{p} &= \beta_{0} + \beta_{X1}X_{p} + \beta_{X2}X^{2}_{p} \\
+\end{align*}
+
+with $H_{p}$ the BLUPs for height of the population $p$ in the site $s$ (calculated with the model 2 of [Archambeau et al. 2021](https://www.biorxiv.org/content/10.1101/2020.11.13.382515v1.abstract), which accounts for the population-by-site interaction) and $X_{p}$ is the value of the variable of interest (GO or CTD) in the population $p$. We include a quadratic term for $X_p$ to allow for potential nonlinearity in the response, following @fitzpatrick2021experimental.
+
+## Load the data
+
+### Height data
+
+We use here the provenance intercepts obtained in the model 1 of the first paper. 
+
+```{r ExtractBlockIntercepts,message=F,warning=F}
+heights <- readRDS(file="../../Pinpin_Clonapin/HeightPinpinClonapin/outputs/models/P1/MOD2.rds") %>% 
+  broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>%   # we take the mean of the prov random intercepts
+  filter(str_detect(term, "^(r_prov:site)|^(r_prov\\[)")) 
+
+heights <- readRDS(file="../../Pinpin_Clonapin/HeightPinpinClonapin/outputs/models/P1/MOD4.rds") %>% 
+  broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>%   # we take the mean of the prov random intercepts
+  filter(str_detect(term, "^(r_prov:site)|^(r_prov\\[)")) 
+  # dplyr::rename(height=estimate,prov=term) %>% 
+  # mutate(prov=str_sub(prov,8,-12))
+
+heights %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+## Run the models
+
+```{r CompileMortalityModel, cache=T,message=F,warning=F}
+stancode = stan_model("scripts/StanModels/GaussianModelHeightCG.stan")
+print(stancode)
+```
+
+
+
+```{r RunMortalityModels, eval=F}
+sites <- c("caceres","madrid","asturias","bordeaux","portugal")
+
+DF <- sapply(sites,function(sel.site){
+
+site.intercepts <- heights %>%
+  filter(term %in% term[str_detect(term,"^(r_prov:site\\[)")]) %>% 
+  filter(term %in% term[str_detect(term,sel.site)]) %>% 
+  mutate(prov=str_sub(term,13,15)) %>% 
+  dplyr::rename(site.estimate=estimate) %>% 
+  dplyr::select(prov,site.estimate) 
+
+intercepts <- heights %>% 
+  filter(term %in% term[str_detect(term,"^(r_prov\\[)")]) %>% 
+  mutate(prov=str_sub(term,8,-12)) %>% 
+  dplyr::rename(mean.estimate=estimate) %>% 
+  dplyr::select(prov,mean.estimate) %>% 
+  inner_join(site.intercepts,by="prov") %>% 
+  mutate(estimate=mean.estimate+site.estimate)
+  
+vars <- colnames(df)[str_detect(colnames(df),"CTD|GO")]
+
+counter <- 0
+
+DFint <- sapply(vars,function(x){
+
+  counter <<- counter + 1 
+  
+  subdf <- df %>% 
+    filter(site==sel.site) %>% 
+    inner_join(intercepts[,c("prov","estimate")], by="prov")
+
+  
+  X <- subdf[,x] %>% pull()
+
+  stanlist <- list(N=length(subdf$prov),
+                   H=subdf$estimate,
+                   X=(X -mean(X)/sd(X)))
+
+  # Running the model
+  mstan <- sampling(stancode, data = stanlist, iter = 2000, chains = 4, cores = 4) 
+
+  p <- mstan %>%  
+    mcmc_areas(regex_pars = "beta", # "beta|alpha"
+                        prob=prob,
+                        prob_outer=prob_outer,
+                        point_est = "median") +  
+    theme_bw() + 
+    scale_y_discrete(labels=c("beta0"=parse(text=TeX("$\\beta_{0}$")),
+                              "betaH"=parse(text=TeX("$\\beta_{H}$")),
+                              'betaX1'=parse(text = TeX("$\\beta_{X1}$")),
+                              'betaX2'=parse(text = TeX("$\\beta_{X2}$")))) +
+    ggtitle(paste0(vars[[counter]]," - ", sel.site)) +
+    theme(axis.text = element_text(size=16)) 
+  
+  ggsave(p,file=paste0("outputs/ValidationCG/Figs/HeightModels/MCMCareas_",vars[[counter]],"_",sel.site,".pdf"),device="pdf")
+  
+  
+  # Save coefficients
+  broom::tidyMCMC(mstan,
+                  droppars = NULL, 
+                  estimate.method = "median", 
+                  ess = F, 
+                  rhat = F, 
+                  conf.int = T,
+                  conf.level = prob) %>% 
+  filter(str_detect(term, c('R_squared|beta')))
+
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="variable")
+  
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="site")
+
+saveRDS(DF,file="outputs/ValidationCG/TablesPosteriors/OutputsHeightModels.rds")
+```
+
+```{r LookTablePosteriorsMortalityModels}
+DF <- readRDS(file="outputs/ValidationCG/TablesPosteriors/OutputsHeightModels.rds")
+DF %>% 
+  print(n=Inf) %>%
+  knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F)
+```
+
+
+# References
+
