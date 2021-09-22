@@ -196,6 +196,105 @@ NFIdata <- readRDS(file="data/IFN/alexdata/dfplotPINPINA0.8R.M.rds") %>%
 NFIdata <- NFIdata[!(NFIdata$NbTot==0),]
 ```
 
+## Env. data in common gardens
+
+```{r CommonGardenEnvData}
+data.cg <- readRDS(file="data/AllDataPhenoClimSoil.RDS") %>% 
+  dplyr::select(site,
+                longitude_site,
+                latitude_site,
+                water_top_site,
+                depth_roots_site) %>% 
+  dplyr::rename(latitude=latitude_site,
+                longitude=longitude_site,
+                water_top=water_top_site,
+                depth_roots=depth_roots_site) %>% 
+  unique() %>% 
+  as_tibble()
+
+# Path to WorldClim data
+path="data/climate/CurrentClimate/WorldClim30sec_1970_2000/"
+
+# List the WorldClim files (the bioclimatic variables)
+myFiles <- list.files(path,pattern=".tif") %>% 
+  str_subset("bio_1.|bio_5.|bio_6.|bio_12.|bio_15.")
+
+vars <- str_sub(myFiles,11,-5) %>% str_remove("_") #%>% str_c("WC_site")
+
+for (i in 1:length(myFiles)){
+  rast <- raster(paste0(path,myFiles[i]))
+  data.cg[,vars[i]] <- raster::extract(rast,data.cg[,c("longitude","latitude")])}
+
+data.cg <- data.cg %>% dplyr::select(site,
+                           longitude,
+                           latitude,
+                           bio1,
+                           bio5,
+                           bio6,
+                           bio12,
+                           bio15,
+                           water_top,
+                           depth_roots)
+
+## Merging topography and burned area
+rast <- raster("data/Topography/TRI_WGS84.tif")
+data.cg[,"TRI"] <- raster::extract(rast,data.cg[,c("longitude","latitude")])
+
+rast <- raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
+data.cg[,"BurnedArea"] <- raster::extract(rast,data.cg[,c("longitude","latitude")])
+
+data.cg <- data.cg %>%  setNames(c("s2.site","s2.xCoord","s2.yCoord",paste0("s2.",colnames(.)[-c(1:3)])))
+
+data.cg %>% 
+  kable(digits=3) %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+
+data.cg.gdm <- replicate(34,data.cg,simplify=F) %>% 
+  bind_rows() %>% 
+  dplyr::select(-s2.site,-s2.bio1)
+  
+
+data.prov <- readRDS(file="data/PhenoEnvPopStructureDataset.RDS") %>% 
+  dplyr::rename(bio1="bio1WC_prov",
+                bio5="bio5WC_prov",
+                bio6="bio6WC_prov",
+                bio12="bio12WC_prov",
+                bio15="bio15WC_prov",
+                water_top="water_top_prov",
+                depth_roots="depth_roots_prov",
+                latitude="latitude_prov",
+                longitude="longitude_prov") %>% 
+  dplyr::select(prov,longitude,latitude,all_of(select.var),bio1) %>% 
+  unique() %>% 
+  as_tibble() %>% 
+  setNames(c("s1.prov","s1.xCoord","s1.yCoord",paste0("s1.",colnames(.)[-c(1:3)])))
+
+
+# For GDM
+data.pred.gdm <-  data.prov %>% 
+  dplyr::select(-s1.prov,-s1.bio1) %>% 
+  slice(rep(1:n(), each = 5)) %>% 
+  bind_cols(data.cg.gdm) %>% 
+  mutate(distance=0,
+         weights=0) %>% 
+  dplyr::select(distance, weights, s1.xCoord, s1.yCoord, s2.xCoord, s2.yCoord,
+                everything()) %>% 
+  mutate(s2.yCoord=s1.yCoord,         # We fix the coordinates, to check with Santi if this step is ok ! 
+         s2.xCoord=s1.xCoord,
+         s2.BurnedArea=s1.BurnedArea) # Do we fix the BurnedArea in the CG the same as in the provenances? 
+
+# For GF
+data.pred.prov.gf <- data.pred.gdm %>% 
+  dplyr::select(contains("s1"),-contains("Coord")) %>% 
+  setNames(str_sub(colnames(.),4,-1))
+
+data.pred.site.gf <- data.pred.gdm %>% 
+  dplyr::select(contains("s2"),-contains("Coord")) %>% 
+  setNames(str_sub(colnames(.),4,-1))
+
+```
 
 
 # General Dissimilarity Modeling
@@ -541,6 +640,17 @@ dev.off()
   saveRDS(GO.nfi,file=paste0("outputs/GDM/ExtractedGenomicOffsetNFI/nfiGO_",x,"_",snp.sets.codes[[counter]],".rds"))
   
 })
+
+  
+# Predictions of the genomic offset in the common gardens
+# -------------------------------------------------------
+
+data.pred.gdm$GO <- predict.gdm(gdm.mod,data.pred.gdm)
+data.pred.gdm <- data.pred.gdm %>% 
+  dplyr::select(-distance,-weights,-s2.xCoord,-s2.yCoord) %>% # remove fake coordinates of the sites
+  inner_join(data.cg[,c("s2.site","s2.bio5", "s2.bio6", "s2.bio12", "s2.bio15", "s2.water_top", "s2.depth_roots", "s2.TRI", "s2.bio1")]) %>% 
+  inner_join(data.prov[,c("s1.prov","s1.xCoord", "s1.yCoord","s1.bio1")])
+saveRDS(data.pred.gdm,file=paste0("outputs/GDM/ExtractedGenomicOffsetCG/CGGO_",snp.sets.codes[[counter]],".rds"))
 
 # We could save the outputs, in case this is useful later:
 outputs <- list(model=gdm.mod,
@@ -897,6 +1007,31 @@ CalculateGOGF(rast.fut=stackFutClimSSP585,    # Scenario SSP5-8.5
               rast.cur=stackCurrClimRes25min, # Map of current climate with resoluation 2.5 min
               model=gf,
               scenario="SSP585")
+
+
+
+# Predictions of the genomic offset in the common gardens
+# -------------------------------------------------------
+
+  # predictions for the provenances
+  prod.prov <- predict(gf, as.data.frame(data.pred.prov.gf))
+  
+  # predictions for the sites
+  prod.site <- predict(gf, as.data.frame(data.pred.site.gf))
+
+
+  # calculate euclidean distance between provenance and site genetic spaces  
+  data.pred.gdm$GO <- sqrt((prod.prov[,1]-prod.site[,1])^2 + (prod.prov[,2]-prod.site[,2])^2
+               + (prod.prov[,3]-prod.site[,3])^2 + (prod.prov[,4]-prod.site[,4])^2
+               + (prod.prov[,5]-prod.site[,5])^2 + (prod.prov[,6]-prod.site[,6])^2
+               + (prod.prov[,7]-prod.site[,7])^2 + (prod.prov[,8]-prod.site[,8])^2)
+  
+  data.pred.gdm <- data.pred.gdm %>% 
+  dplyr::select(-distance,-weights,-s2.xCoord,-s2.yCoord) %>% # remove fake coordinates of the sites
+  inner_join(data.cg[,c("s2.site","s2.bio5", "s2.bio6", "s2.bio12", "s2.bio15", "s2.water_top", "s2.depth_roots", "s2.TRI", "s2.bio1")]) %>% 
+  inner_join(data.prov[,c("s1.prov","s1.xCoord", "s1.yCoord","s1.bio1")])
+  saveRDS(data.pred.gdm,file=paste0("outputs/GF/ExtractedGenomicOffsetCG/CGGO_",snp.sets.codes[[counter]],".rds"))
+  
 
 })
 ```
