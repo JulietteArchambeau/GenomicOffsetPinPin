@@ -110,7 +110,7 @@ with $N_{i}$ the total number of maritime pines in the plot $i$, $m_{i}$ the num
 This model will be performed for the genomic offset estimated with both the GDM and GF methods, for each set of SNPs (four sets) and each scenario of future climate (two scenarios), therefore leading to 16 models runs.
 
 ```{r CompileModel, cache=T,message=F,warning=F}
-stancode = stan_model("scripts/StanModels/BinomialCloglogMortalityNFI/BinomialCloglogMortalityNFI.stan")
+stancode = stan_model("scripts/StanModels/BinomialCloglogMortalityNFI.stan")
 print(stancode)
 ```
 
