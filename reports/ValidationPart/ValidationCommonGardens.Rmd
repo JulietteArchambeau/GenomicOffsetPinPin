@@ -88,10 +88,10 @@ df <- lapply(c("GDM","GF"), function(x){
 }) %>% 
   bind_rows() %>% 
   mutate(CTD.bio1=s1.bio1-s2.bio1,
-         CTD.bio5=s1.bio1-s2.bio5,
-         CTD.bio6=s1.bio1-s2.bio6,
-         CTD.bio12=s1.bio1-s2.bio12,
-         CTD.bio15=s1.bio1-s2.bio15) %>% 
+         CTD.bio5=s1.bio5-s2.bio5,
+         CTD.bio6=s1.bio6-s2.bio6,
+         CTD.bio12=s1.bio12-s2.bio12,
+         CTD.bio15=s1.bio15-s2.bio15) %>% 
   pivot_wider(names_from=SNPSets,values_from = GO,names_prefix="GO.") %>% 
   pivot_wider(names_from=Model,values_from = c(GO.Ref,GO.Mer,GO.Mid,GO.Com),names_sep = ".") %>% 
   dplyr::select(-contains(c("s1.bio","s2.bio","depth","water","TRI","Burned","s1.x","s1.y"))) %>% 
@@ -124,7 +124,7 @@ with $p_{p}$ the count of individual that died in the population $p$, $N_{g}$ th
 
 We use here the provenance intercepts obtained in the model 1 of the first paper. 
 
-```{r ExtractBlockIntercepts,message=F,warning=F}
+```{r ExtractHeightInterceptsPaper1Model1,message=F,warning=F}
 HierMod <- readRDS(file="../../Pinpin_Clonapin/HeightPinpinClonapin/outputs/models/P1/MOD1.rds")
 heights <- HierMod %>% broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>% # we take the mean of the prov random intercepts
   filter(str_detect(term, "^(r_prov\\[)")) %>% 
@@ -259,6 +259,7 @@ DF %>%
 
 # Height models
 
+## Mathematical model
 
 In this section, we want to determine whether **genomic offset (GO)** or **climate transfer distances (CTD)** are associated with the **mean height of the populations**, independantly in five common gardens located in Spain (Asturias, Madrid, Caceres), Portugal (near Fundao) and France (Pierroton). In each common garden $s$, we perfom the following model:
   
@@ -267,15 +268,23 @@ H_{p}  &\sim \mathcal{N}(\mu_{p},\sigma^{2}_{r}) \\
 \mu_{p} &= \beta_{0} + \beta_{X1}X_{p} + \beta_{X2}X^{2}_{p} \\
 \end{align*}
 
-with $H_{p}$ the BLUPs for height of the population $p$ in the site $s$ (calculated with the model 2 of [Archambeau et al. 2021](https://www.biorxiv.org/content/10.1101/2020.11.13.382515v1.abstract), which accounts for the population-by-site interaction) and $X_{p}$ is the value of the variable of interest (GO or CTD) in the population $p$. We include a quadratic term for $X_p$ to allow for potential nonlinearity in the response, following @fitzpatrick2021experimental.
+with $H_{p}$ the BLUPs for height of the population $p$ in the site $s$ (calculated with site-specific models in which the effects of blocks and the genetic population structure were accounted for, see script `EstimatingBLUPsForHeight.R`) and $X_{p}$ is the value of the variable of interest (GO or CTD) in the population $p$. We include a quadratic term for $X_p$ to allow for potential nonlinearity in the response, following @fitzpatrick2021experimental.
 
-## Load the data
+<!-- First version: The BLUPs were calculated with the model 2 of [Archambeau et al. 2021](https://www.biorxiv.org/content/10.1101/2020.11.13.382515v1.abstract), which accounts for the population-by-site interaction -->
 
-### Height data
 
-We use here the provenance intercepts obtained in the model 1 of the first paper. 
+```{r CompileHeightModel, cache=T,message=F,warning=F}
+stancode = stan_model("scripts/StanModels/GaussianModelHeightCG.stan")
+print(stancode)
+```
 
-```{r ExtractBlockIntercepts,message=F,warning=F}
+## Running the models
+
+<!-- ## Using intercepts from paper 1 -->
+
+<!-- We use here the provenance intercepts obtained in the model 1 of the first paper.  -->
+
+```{r ExtractHeightInterceptsPaper1Model2orModel4,message=F,warning=F,eval=F,echo=F}
 heights <- readRDS(file="../../Pinpin_Clonapin/HeightPinpinClonapin/outputs/models/P1/MOD2.rds") %>% 
   broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>%   # we take the mean of the prov random intercepts
   filter(str_detect(term, "^(r_prov:site)|^(r_prov\\[)")) 
@@ -290,36 +299,26 @@ heights %>%
   knitr::kable(digits = 3) %>% 
   kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
   column_spec(1, bold = T)
-```
 
-## Run the models
-
-```{r CompileMortalityModel, cache=T,message=F,warning=F}
-stancode = stan_model("scripts/StanModels/GaussianModelHeightCG.stan")
-print(stancode)
-```
-
-
-
-```{r RunMortalityModels, eval=F}
 sites <- c("caceres","madrid","asturias","bordeaux","portugal")
 
 DF <- sapply(sites,function(sel.site){
 
 site.intercepts <- heights %>%
-  filter(term %in% term[str_detect(term,"^(r_prov:site\\[)")]) %>% 
-  filter(term %in% term[str_detect(term,sel.site)]) %>% 
-  mutate(prov=str_sub(term,13,15)) %>% 
-  dplyr::rename(site.estimate=estimate) %>% 
-  dplyr::select(prov,site.estimate) 
+  filter(term %in% term[str_detect(term,"^(r_prov:site\\[)")]) %>%
+  filter(term %in% term[str_detect(term,sel.site)]) %>%
+  mutate(prov=str_sub(term,13,15)) %>%
+  dplyr::rename(site.estimate=estimate) %>%
+  dplyr::select(prov,site.estimate)
 
-intercepts <- heights %>% 
-  filter(term %in% term[str_detect(term,"^(r_prov\\[)")]) %>% 
-  mutate(prov=str_sub(term,8,-12)) %>% 
-  dplyr::rename(mean.estimate=estimate) %>% 
-  dplyr::select(prov,mean.estimate) %>% 
-  inner_join(site.intercepts,by="prov") %>% 
+intercepts <- heights %>%
+  filter(term %in% term[str_detect(term,"^(r_prov\\[)")]) %>%
+  mutate(prov=str_sub(term,8,-12)) %>%
+  dplyr::rename(mean.estimate=estimate) %>%
+  dplyr::select(prov,mean.estimate) %>%
+  inner_join(site.intercepts,by="prov") %>%
   mutate(estimate=mean.estimate+site.estimate)
+
   
 vars <- colnames(df)[str_detect(colnames(df),"CTD|GO")]
 
@@ -338,7 +337,7 @@ DFint <- sapply(vars,function(x){
 
   stanlist <- list(N=length(subdf$prov),
                    H=subdf$estimate,
-                   X=(X -mean(X)/sd(X)))
+                   X=(X -mean(X))/sd(X))
 
   # Running the model
   mstan <- sampling(stancode, data = stanlist, iter = 2000, chains = 4, cores = 4) 
@@ -356,7 +355,7 @@ DFint <- sapply(vars,function(x){
     ggtitle(paste0(vars[[counter]]," - ", sel.site)) +
     theme(axis.text = element_text(size=16)) 
   
-  ggsave(p,file=paste0("outputs/ValidationCG/Figs/HeightModels/MCMCareas_",vars[[counter]],"_",sel.site,".pdf"),device="pdf")
+  #ggsave(p,file=paste0("outputs/ValidationCG/Figs/HeightModels/MCMCareas_",vars[[counter]],"_",sel.site,".pdf"),device="pdf")
   
   
   # Save coefficients
@@ -377,17 +376,167 @@ DFint <- sapply(vars,function(x){
   
   bind_rows(.id="site")
 
-saveRDS(DF,file="outputs/ValidationCG/TablesPosteriors/OutputsHeightModels.rds")
+
 ```
 
-```{r LookTablePosteriorsMortalityModels}
-DF <- readRDS(file="outputs/ValidationCG/TablesPosteriors/OutputsHeightModels.rds")
+
+```{r RunHeightModels, eval=F}
+# List of height measurements we look at:
+sites <- c("MAD_htdec11","CAC_htdec11","BDX_htnov13","BDX_htnov18","POR_htjan12","POR_htmay13","AST_htdec11","AST_htmar14")
+
+match.site <- list(MAD_htdec11="madrid",
+              CAC_htdec11="caceres",
+              BDX_htnov13="bordeaux",
+              BDX_htnov18="bordeaux",
+              POR_htjan12="portugal",
+              POR_htmay13="portugal",
+              AST_htdec11="asturias",
+              AST_htmar14="asturias")
+
+# !!! Do we account for population structure or not in the BLUPs? !!!
+PopStructure <- "AccountingPopStructure" # AccountingPopStructure or NotAccountingPopStructure
+
+# List model files
+mod.files <-  list.files(paste0("outputs/ValidationCG/ModelsHeightBLUPs/",PopStructure,"/Models"), full.names=TRUE)
+
+
+# Launch the function to run one model per height measurement:
+DF <- sapply(sites,function(sel.site){
+ 
+# Extract the BLUPs (mean intercept of each population)
+intercepts  <- readRDS(file=paste0("outputs/ValidationCG/ModelsHeightBLUPs/",PopStructure,"/Models/",sel.site,".rds")) %>% 
+  broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>%   # we take the mean of the prov random intercepts
+  filter(str_detect(term, "^(r_prov\\[)")) %>% 
+  mutate(prov=str_sub(term,8,-12)) %>% 
+  dplyr::select(prov,estimate)
+  
+vars <- colnames(df)[str_detect(colnames(df),"CTD|GO")]
+
+counter <- 0
+
+DFint <- sapply(vars,function(x){
+
+  counter <<- counter + 1 
+  
+  # Merge the mean population intercepts with the variables of interest (CTD and GO)
+  subdf <- df %>% 
+    filter(site==match.site[[sel.site]]) %>% 
+    inner_join(intercepts[,c("prov","estimate")], by="prov")
+
+  
+  X <- subdf[,x] %>% pull()
+  
+  # List for Stan
+  stanlist <- list(N=length(subdf$prov),
+                   H=subdf$estimate,
+                   X=(X -mean(X))/sd(X))
+
+  # Running the model with rstan
+  mstan <- sampling(stancode, data = stanlist, iter = 2000, chains = 4, cores = 4) 
+
+  # Plot the posteriors of the regression coefficients (beta_0, beta_X1 and beta_X2) and R^2
+  p <- mstan %>%  
+    mcmc_areas(regex_pars = "beta", # "beta|alpha"
+                        prob=prob,
+                        prob_outer=prob_outer,
+                        point_est = "median") +  
+    theme_bw() + 
+    scale_y_discrete(labels=c("beta0"=parse(text=TeX("$\\beta_{0}$")),
+                              "betaH"=parse(text=TeX("$\\beta_{H}$")),
+                              'betaX1'=parse(text = TeX("$\\beta_{X1}$")),
+                              'betaX2'=parse(text = TeX("$\\beta_{X2}$")))) +
+    ggtitle(paste0(vars[[counter]]," - ", sel.site)) +
+    theme(axis.text = element_text(size=16)) 
+  
+  ggsave(p,file=paste0("outputs/ValidationCG/Figs/HeightModels/",PopStructure,"/MCMCareas_",vars[[counter]],"_",sel.site,".pdf"),device="pdf")
+  
+  
+  # Save the coefficients in a table
+  broom::tidyMCMC(mstan,
+                  droppars = NULL, 
+                  estimate.method = "median", 
+                  ess = F, 
+                  rhat = F, 
+                  conf.int = T,
+                  conf.level = prob) %>% 
+  filter(str_detect(term, c('R_squared|beta')))
+
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="variable")
+  
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="site")
+
+saveRDS(DF,file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsHeightModels_",PopStructure,".rds"))
+```
+
+```{r LookTablePosteriorsHeightModels, eval=F}
+DF <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsHeightModels_",PopStructure,".rds"))
+
 DF %>% 
+  filter(term=="betaX1"|term=="betaX2") %>% 
   print(n=Inf) %>%
   knitr::kable(digits = 3) %>% 
   kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F)
+
+DF %>% 
+  filter(term=="R_squared") %>% 
+  print(n=Inf) 
+
+DF %>% 
+  filter(term=="betaX1") %>% 
+  print(n=Inf)
+
 ```
 
+## Visualization
+
+```{r SummaryFigsHeightModels}
+index.match <- list(R_squared=c("R2","Goodness of fit ($R^{2}$ estimate)"),
+                    betaX1=c("betaX1","Genomic offset effect ($\\beta_{X1}$ estimate)"))
+
+lapply(c("betaX1","R_squared"),function(index){
+  
+p <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsHeightModels_",PopStructure,".rds")) %>% 
+  filter(term==index) %>% 
+  mutate(Method=case_when(str_detect(variable,"CTD")==TRUE~"Climatic transfer distance",
+                          str_detect(variable,"GDM")==TRUE~"Genomic offset",
+                          str_detect(variable,"GF")==TRUE~"Genomic offset"),
+         Method.GO=case_when(str_detect(variable,"CTD")==TRUE~"CTD",
+                             str_detect(variable,"GDM")==TRUE~"GDM",
+                          str_detect(variable,"GF")==TRUE~"GF"),
+         Variable=case_when(str_detect(variable,"CTD")==TRUE~str_sub(variable,5,-1),
+                            str_detect(variable,"GO")==TRUE~str_sub(variable,4,6))) %>% 
+  
+  ggplot(aes(x = Variable, y = estimate,ymin = conf.low, ymax = conf.high,colour=Method.GO,shape=Method.GO)) +#
+  geom_hline(yintercept = 0,color="gray") +
+  geom_pointinterval(position = position_dodge(width = .4),point_size=2.5,show.legend = c(size = TRUE)) +
+  facet_grid(site~Method,scales="free_x", space = "free") + 
+  ylab(TeX(index.match[[index]][[2]])) + xlab("") +
+  scale_colour_manual(values=c("mediumpurple1","turquoise2","forestgreen"),
+                      breaks = c('GF', 'GDM')) +
+  scale_shape_manual(values = c(15, 16,17),
+                     breaks = c('GF', 'GDM')) +
+  theme_bw() +
+  labs(color="Genomic offset methodology:",shape="Genomic offset methodology:") +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=16),
+      legend.title=element_text(size=13), 
+      legend.text=element_text(size=10),
+      legend.position = "bottom",
+      legend.background = element_rect(colour = "grey"),
+      strip.text.x = element_text(size = 14),
+      strip.text.y = element_text(size=12,angle = 0),
+      panel.grid.minor.x=element_blank(),
+      panel.grid.major.x=element_blank()) +
+    guides(color=guide_legend(ncol=2))
+  
+ggsave(p,file=paste0("outputs/ValidationCG/Figs/HeightModels/SummaryFigures/",index.match[[index]][[1]],"_",PopStructure,".pdf"),device="pdf")
+})
+```
 
 # References
 
