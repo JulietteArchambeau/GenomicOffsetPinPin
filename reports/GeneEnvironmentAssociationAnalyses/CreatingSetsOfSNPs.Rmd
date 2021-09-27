@@ -57,11 +57,11 @@ In this document, we create a list of three sets of SNPs that will be used to ca
 
   - The **reference SNPs**.
 
-  - the **common candidates**: with *both* BF > 10dB in BayPass and SNP loadings > 3 sd cutoff in the RDA for the chosen set of covariates.
+  - the **common candidates**: with *both* BF > 5dB in BayPass and SNP loadings > 3 sd cutoff in the RDA for the chosen set of covariates.
   
-  - the **candidates under expected strong selection**: RDA candidates that show a strong association with at least one covariate, i.e. with $\beta_{RDA} > 0.3$, and all the BayPass candidates (BF > 10dB).
+  - the **candidates under expected strong selection**: RDA candidates that show a strong association with at least one covariate, i.e. with $\beta_{RDA} > 0.3$, and all the BayPass candidates (BF > 5dB).
 
-  - the **merged candidates**: with *either* BF > 10dB in BayPass or SNP loadings > 3 sd cutoff in the RDA for the chosen set of covariates.
+  - the **merged candidates**: with *either* BF > 5dB in BayPass or SNP loadings > 3 sd cutoff in the RDA for the chosen set of covariates.
                 
 
 # Load data
