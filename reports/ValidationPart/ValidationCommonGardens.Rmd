@@ -61,6 +61,7 @@ color_scheme_set("green")
 library(reshape2)
 library(dplyr)
 library(tidyverse)
+library(xtable)
 library(latex2exp)
 library(kableExtra)
 ```
@@ -108,14 +109,21 @@ df %>%
 
 # Mortality models
 
-In this section, we want to determine whether **genomic offset (GO)** or **climate transfer distances (CTD)** are associated with the **proportion of dead trees in the populations**, independantly in two common gardens located in Spain (next to Madrid and Caceres, respectively) and in which mortality rates were high. For that, we build a model that assumes that **tree height acts as a confounder**. Indeed, trees that were higher at the time of planting have a higher probability of survival. This is particularly true in Madrid and Caceres where there were an extreme drought event the same year the trees were planted. Here is the model:
+In this section, we want to determine whether **genomic offset (GO)** or **climate transfer distances (CTD)** are associated with the **proportion of dead trees in the populations**, independantly in two common gardens located in Spain (next to Madrid and Cáceres, respectively) and in which mortality rates were high. For that, we build a model that assumes that **tree height acts as a confounder**. Indeed, trees that were higher at the time of planting have a higher probability of survival. This is particularly true in Madrid and Cáceres where there were an extreme drought event the same year the trees were planted. Here is the model:
   
 \begin{align*} 
 a_{p} &\sim \text{Binomial} (N_{p},p_{p}) \\
-\text{logit}(p_{p}) &= \beta_{0} +  \beta_{H}H_{p} + \beta_{X1}X_{p} + \beta_{X2}X^{2}_{p} \\
+\text{logit}(p_{p}) &= \beta_{0} +  \beta_{H}H_{p} + \beta_{X1}X_{p}\\
 \end{align*}
 
-with $p_{p}$ the count of individual that died in the population $p$, $N_{g}$ the total number of individuals in the population $p$ (=number of individuals that were initially planted in the common garden), $X_{p}$ is the value of the variable of interest (GO or CTD) in the population $p$ and $H_{p}$ is the BLUPs for height of the population $p$ (calculated across all common gardens in the model 1 of [Archambeau et al. 2021](https://www.biorxiv.org/content/10.1101/2020.11.13.382515v1.abstract)). We use the BLUPs calculated across all common gardens because we showed in paper 1 that the population-by-site interaction was very small and so we neglect it. We included a quadratic term for $X_p$ to allow for potential nonlinearity in the response, following @fitzpatrick2021experimental.
+
+with $a_{p}$ the count of individual that died in the population $p$, $N_{p}$ the total number of individuals in the population $p$ (=number of individuals that were initially planted in the common garden), $p_p$ is the estimated probability of mortality in the population $p$, $X_{p}$ is the genomic offset or climatic transfer distance for the population $p$ and $H_{p}$ is the BLUPs for height of the population $p$ (population varying intercepts calculated across all common gardens in the model 1 of \cite{archambeauCombiningClimaticGenomic2021}). We included $H_{p}$ as a covariate in the model to account for height differences before planting, as smaller trees had a higher mortality probability than taller trees. We used the following weakly informative priors:
+
+  
+\begin{align*} 
+\begin{bmatrix}  \beta_{0,c} \\ \beta_{H} \\ \beta_{X_1} \end{bmatrix} &\sim \mathcal{N}(0,5)
+\end{align*}
+
 
 
 ## Load the data
@@ -137,7 +145,7 @@ heights %>%
   column_spec(1, bold = T)
 ```
 
-### Survival data (response variable)
+### Mortality data (response variable)
 
 ```{r LoadSurvData}
 data <- readRDS(file="data/ClonapinData/PhenoDataNovember2019_UpdatedSept2021_AllSites.rds")
@@ -361,7 +369,7 @@ ExpDesignTab[,-1] %>%
 
 ## Mathematical model
 
-In this section, we want to determine whether **genomic offset (GO)** or **climate transfer distances (CTD)** are associated with the **mean height of the populations**, independantly in five common gardens located in Spain (Asturias, Madrid, Caceres), Portugal (near Fundao) and France (Pierroton). In each common garden $s$, we perfom the following model:
+In this section, we want to determine whether **genomic offset (GO)** or **climate transfer distances (CTD)** are associated with the **mean height of the populations**, independantly in five common gardens located in Spain (Asturias, Madrid, Cáceres), Portugal (near Fundao) and France (Pierroton). In each common garden $s$, we perfom the following model:
   
 \begin{align*} 
 H_{p}  &\sim \mathcal{N}(\mu_{p},\sigma^{2}_{r}) \\
@@ -486,6 +494,11 @@ DFint <- sapply(vars,function(x){
 
 ```
 
+```{r AccountingOrNotForPopStructure}
+# !!! Do we account for population structure or not in the BLUPs? !!!
+PopStructure <- "NotAccountingPopStructure" # AccountingPopStructure or NotAccountingPopStructure
+```
+
 
 ```{r RunHeightModels, eval=F}
 # List of height measurements we look at:
@@ -499,9 +512,6 @@ match.site <- list(MAD_htdec11="madrid",
               POR_htmay13="portugal",
               AST_htdec11="asturias",
               AST_htmar14="asturias")
-
-# !!! Do we account for population structure or not in the BLUPs? !!!
-PopStructure <- "NotAccountingPopStructure" # AccountingPopStructure or NotAccountingPopStructure
 
 # List model files
 mod.files <-  list.files(paste0("outputs/ValidationCG/ModelsHeightBLUPs/",PopStructure,"/Models"), full.names=TRUE)
