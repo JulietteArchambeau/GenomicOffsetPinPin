@@ -64,6 +64,10 @@ library(raster)
 library(sgdm)
 library(rgeos)
 library(kableExtra)
+library(ggpubr)
+library(cowplot)
+library(RColorBrewer)
+library(xtable)
 ```
 
 ```{r FuntionsOptionsUsed,echo=F}
@@ -347,13 +351,16 @@ rast3[mapCells] <- scalB
 outRast <- stack(rast1, rast2, rast3)
 
 # Map of the projected current genetic composition
-pdf(paste0("outputs/GDM/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],".pdf"))
-plot(background,col=grayscale_colors, axes=FALSE,legend=F,main=snp.sets.names[[counter]])
+pdf(paste0("outputs/GDM/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
+plot(background,
+     col=grayscale_colors,
+     #main=snp.sets.names[[counter]],
+     axes=FALSE,legend=F)
 plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
 dev.off()
 
 # Create the PCA of the importance of the environmental variables
-pdf(paste0("outputs/GDM/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],".pdf"))
+pdf(paste0("outputs/GDM/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
 nvs <- dim(pca$rotation)[1]
 vec <-  row.names(pca$rotation)
 lv <- length(vec)
@@ -362,8 +369,14 @@ scal <- 5
 xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
 yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
 pca$rotation
-plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1,
-     main=snp.sets.names[[counter]])
+plot((pca$x[, 1:2]), 
+     xlim = xrng, 
+     ylim = yrng, 
+     pch = ".", 
+     cex = 4,
+     #main=snp.sets.names[[counter]],
+     col = rgb(scalR , scalG, scalB, max = 255), 
+     asp = 1)
 points(pca$rotation[!vind, 1:2]/scal, pch = "+")
 arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
 jit <- 0.0015
@@ -375,7 +388,7 @@ dev.off()
 ```
 
 
-```{r GDManalyses}
+```{r GDManalyses,eval=F}
 # We use a counter to refer to the different sets of SNPs:
 # set 1 (1st iteration) => reference SNPs
 # set 2 (2nd iteration) => merged candidates
@@ -445,98 +458,98 @@ gdm.mod.pred <- predict.gdm(gdm.mod, gdmTab)
 
 # Figure: Predicted vs observed genetic distances
 pdf(paste0("outputs/GDM/ModelRuns/Figs/ObsPred_",snp.sets.codes[[counter]],".pdf"))
-plot(gdmTab$distance, gdm.mod.pred, 
+plot(gdmTab$distance, gdm.mod.pred,
      xlab="Observed genetic distance",
-     ylab="Predicted genetic distance", 
+     ylab="Predicted genetic distance",
      main=snp.sets.names[[counter]],
      pch=20, col=rgb(0,0,1,0.5))
 lines(c(-1,2), c(-1,2))
-dev.off() 
+dev.off()
 
 # Figures: I-splines associated with each variable (geographical and environmental variables)
 pdf(paste0("outputs/GDM/ModelRuns/Figs/Splines_",snp.sets.codes[[counter]],".pdf"))
 layout(matrix(1:9,3,3))
 gdm.mod.splineDat <- isplineExtract(gdm.mod)
 
-plot(gdm.mod.splineDat$x[,"Geographic"], 
-     gdm.mod.splineDat$y[,"Geographic"], 
-     lwd=3,type="l", 
-     xlab="Geographical distance", 
-     ylab="Partial genetic distance",
-     ylim=c(0,0.9)) # or ylab= f(Geographic distance)
-
-plot(gdm.mod.splineDat[[1]][,"bio5"], 
-     gdm.mod.splineDat[[2]][,"bio5"], 
-     type="l",
-     lwd=3, 
-     xlab="Max T warmest month (C°)", 
+plot(gdm.mod.splineDat$x[,"Geographic"],
+     gdm.mod.splineDat$y[,"Geographic"],
+     lwd=3,type="l",
+     xlab="Geographical distance",
      ylab="Partial genetic distance",
      ylim=c(0,0.9))
 
-plot(gdm.mod.splineDat[[1]][,"bio6"], 
-     gdm.mod.splineDat[[2]][,"bio6"], 
+plot(gdm.mod.splineDat[[1]][,"bio5"],
+     gdm.mod.splineDat[[2]][,"bio5"],
      type="l",
-     lwd=3, 
-     xlab="Min T coldest month (C°)", 
+     lwd=3,
+     xlab="Max T° warmest month (C°)",
      ylab="Partial genetic distance",
      ylim=c(0,0.9))
 
-plot(gdm.mod.splineDat[[1]][,"bio12"], 
-     gdm.mod.splineDat[[2]][,"bio12"], 
+plot(gdm.mod.splineDat[[1]][,"bio6"],
+     gdm.mod.splineDat[[2]][,"bio6"],
      type="l",
-     lwd=3, 
-     xlab="Annual precipitation (mm)", 
+     lwd=3,
+     xlab="Min T° coldest month (C°)",
      ylab="Partial genetic distance",
      ylim=c(0,0.9))
 
-plot(gdm.mod.splineDat[[1]][,"bio15"], 
-     gdm.mod.splineDat[[2]][,"bio15"], 
+plot(gdm.mod.splineDat[[1]][,"bio12"],
+     gdm.mod.splineDat[[2]][,"bio12"],
      type="l",
-     lwd=3, 
-     xlab="Prec seasonality (coeff of variation)", 
+     lwd=3,
+     xlab="Annual precipitation (mm)",
      ylab="Partial genetic distance",
      ylim=c(0,0.9))
 
-plot(gdm.mod.splineDat[[1]][,"water_top"], 
-     gdm.mod.splineDat[[2]][,"water_top"], 
+plot(gdm.mod.splineDat[[1]][,"bio15"],
+     gdm.mod.splineDat[[2]][,"bio15"],
      type="l",
-     lwd=3, 
-     xlab="Total available water content (mm)", 
+     lwd=3,
+     xlab="Prec seasonality (coeff of variation)",
      ylab="Partial genetic distance",
      ylim=c(0,0.9))
 
-plot(gdm.mod.splineDat[[1]][,"depth_roots"], 
-     gdm.mod.splineDat[[2]][,"depth_roots"], 
+plot(gdm.mod.splineDat[[1]][,"water_top"],
+     gdm.mod.splineDat[[2]][,"water_top"],
      type="l",
-     lwd=3, 
-     xlab="Depth available to roots (cm)", 
+     lwd=3,
+     xlab="Total available water content (mm)",
      ylab="Partial genetic distance",
      ylim=c(0,0.9))
 
-plot(gdm.mod.splineDat[[1]][,"TRI"], 
-     gdm.mod.splineDat[[2]][,"TRI"], 
+plot(gdm.mod.splineDat[[1]][,"depth_roots"],
+     gdm.mod.splineDat[[2]][,"depth_roots"],
      type="l",
-     lwd=3, 
-     xlab="Topographic Ruggedness Index", 
+     lwd=3,
+     xlab="Depth available to roots (cm)",
      ylab="Partial genetic distance",
      ylim=c(0,0.9))
 
-plot(gdm.mod.splineDat[[1]][,"BurnedArea"], 
-     gdm.mod.splineDat[[2]][,"BurnedArea"], 
+plot(gdm.mod.splineDat[[1]][,"TRI"],
+     gdm.mod.splineDat[[2]][,"TRI"],
      type="l",
-     lwd=3, 
-     xlab="Burned area", 
+     lwd=3,
+     xlab="Topographic Ruggedness Index (m)",
      ylab="Partial genetic distance",
      ylim=c(0,0.9))
-dev.off() 
+
+plot(gdm.mod.splineDat[[1]][,"BurnedArea"],
+     gdm.mod.splineDat[[2]][,"BurnedArea"],
+     type="l",
+     lwd=3,
+     xlab="Burned area (hectares)",
+     ylab="Partial genetic distance",
+     ylim=c(0,0.9))
+dev.off()
 
 
 # Variable relative importance
 # ----------------------------
 
 # In their article, Fitzpatrick & Keller say:
-# "To estimate relative importance of variables for GDM, 
-# we rescaled the maximum value of the fitted I-Splines between 0 and 1, 
+# "To estimate relative importance of variables for GDM,
+# we rescaled the maximum value of the fitted I-Splines between 0 and 1,
 # which is proportional to variable importance."
 
 # Get the relative importance of the covariates
@@ -604,7 +617,7 @@ p <- dfGO %>%
     labs(color="Scenario of future climate:") +
     xlab("Genomic offset")
 ggsave(p,
-       file=paste0("outputs/GDM/GenomicOffset/DensityPlotGenomicOffset_",snp.sets.codes[[counter]],".pdf"), 
+       file=paste0("outputs/GDM/GenomicOffset/DensityPlotGenomicOffset_",snp.sets.codes[[counter]],"_GDM.pdf"), 
        device = "pdf")
 
 
@@ -618,15 +631,15 @@ lapply(c("SSP370","SSP585"), function(x){
   
   rast.go[rasValue$cell] <- dfGO[,x]
   
-pdf(paste0("outputs/GDM/GenomicOffset/MapGenomicOffset_",x,"_",snp.sets.codes[[counter]],".pdf"))
+pdf(paste0("outputs/GDM/GenomicOffset/MapGenomicOffset_",x,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
 plot(background,col=grayscale_colors, 
      axes=FALSE,
-     legend=F,
-     main=paste0("Genomic offset - ",x))
+     #main=paste0("Genomic offset - ",x),
+     legend=F)
 plot(rast.go,box = FALSE,
      axes = FALSE,
      col=colorRampPalette(c("blue","yellow","red"))(255),
-     #zlim=c(0,0.1),
+     zlim=c(0,0.4),
      add=T,
      bgalpha=0)
 dev.off()  
@@ -659,6 +672,8 @@ outputs <- list(model=gdm.mod,
                 predictions=gdm.mod.pred,
                 splines=gdm.mod.splineDat,
                 var.imptance=RelVarImp)
+
+saveRDS(outputs,file=paste0("outputs/GDM/ModelRuns/Outputs/",snp.sets.codes[[counter]],".rds"))
 })
 ```
 
@@ -703,8 +718,11 @@ rast3[mapCells] <- scalB
 outRast <- stack(rast1, rast2, rast3)
 
 # Create the map of projected genetic composition across the landscape
-pdf(paste0("outputs/GF/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],".pdf"))
-plot(background,col=grayscale_colors, axes=FALSE,legend=F,main=snp.sets.names[[counter]])
+pdf(paste0("outputs/GF/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
+plot(background,
+     col=grayscale_colors,
+     #main=snp.sets.names[[counter]], 
+     axes=FALSE,legend=F)
 plotRGB(outRast, r = 1, g = 3, b = 2,add=T,bgalpha=0)
 dev.off()
 
@@ -717,8 +735,14 @@ scal <- 12
 xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
 yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
 
-pdf(paste0("outputs/GF/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],".pdf"))
-plot((pca$x[, 1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(scalR , scalG, scalB, max = 255), asp = 1)
+pdf(paste0("outputs/GF/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
+plot((pca$x[, 1:2]), 
+     xlim = xrng, 
+     ylim = yrng, 
+     pch = ".", 
+     cex = 4, 
+     col = rgb(scalR , scalG, scalB, max = 255), 
+     asp = 1)
 arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
 jit <- 0.0015
 text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
@@ -810,15 +834,16 @@ GO <- sqrt((proj.cur[,1]-proj.fut[,1])^2 + (proj.cur[,2]-proj.fut[,2])^2
 rast.go <- stackFutClimSSP370[[1]]
 rast.go[rasValue$cell] <- GO
 
-pdf(paste0("outputs/GF/GenomicOffset/MapGenomicOffset_",scenario,"_",snp.sets.codes[[counter]],".pdf"))
+pdf(paste0("outputs/GF/GenomicOffset/MapGenomicOffset_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
 plot(background,col=grayscale_colors, 
      axes=FALSE,
-     legend=F,
-     main=paste0("Genomic offset - ",scenario))
+     #main=paste0("Genomic offset - ",scenario),
+     legend=F)
 plot(rast.go,
      box = FALSE,
      axes = FALSE,
      add=T,
+     zlim=c(0,0.055),
      col=colorRampPalette(c("blue","yellow","red"))(255),
      bgalpha=0)
 dev.off() 
@@ -835,7 +860,7 @@ dev.off()
 ```
 
 
-```{r GFanalyses}
+```{r GFanalyses,eval=T}
 counter <- 0 
 # We use a counter to refer to the different sets of SNPs:
 # set 1 (1st iteration) => reference SNPs
@@ -886,89 +911,104 @@ gf <- readRDS(file=paste0("outputs/GF/ModelRuns/Models/GFmodel_",snp.sets.codes[
 # Figures on variable and overall importance
 # ------------------------------------------
 
-# Overall importance of each variable
-pdf(paste0("outputs/GF/ModelRuns/Figs/OverallImportance_",snp.sets.codes[[counter]],".pdf"))
-plot(gf, plot.type="Overall.Importance")
-dev.off()
-
-# mean(gf$result)
-# sd(gf$result)
-
-pdf(paste0("outputs/GF/ModelRuns/Figs/CumulativeImportance_",snp.sets.codes[[counter]],".pdf"))
-layout(matrix(1:12,4,3))
-# MEM 1
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="MEM1",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8,adj=1)
-
-# MEM 2
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="MEM2",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8,adj=1)
-
-# MEM 3
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="MEM3",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8,adj=1)
-
-# MEM 4
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="MEM4",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8,adj=1)
-
-# Max T° of the warmest month (C°)
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="bio5",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Max T° of the warmest month (C°)", font=2,cex=0.8,adj=1)
-
-# Min T° of the coldest month (°C)
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="bio6",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Min T° of the coldest month (°C)", font=2,cex=0.8,adj=1)
-
-# Annual precipitation (mm)
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="bio12",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8,adj=1)
-
-# Precipitation seasonality (coeff of variation)
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="bio15",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Precipitation seasonality (coeff of variation)", font=2,cex=0.8,adj=1)
-
-# Total available water content (mm)
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="water_top",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Total available water content (mm)", font=2,cex=0.8,adj=1)
-
-# Depth available to roots (cm)
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="depth_roots",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Depth available to roots (cm)", font=2,cex=0.8,adj=1)
-
-# TRI
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="TRI",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Topographic Ruggedness Index", font=2,cex=0.8,adj=1)
-
-# Burned Area
-plot(gf, plot.type="Cumulative.Importance",
-     imp.vars="BurnedArea",
-     plot.args=list(show.species=FALSE,show.overall=TRUE))
-mtext(side=1, line=3.5, "Burned Area", font=2,cex=0.8,adj=1)
-dev.off()
-
+# # Overall importance of each variable
+# pdf(paste0("outputs/GF/ModelRuns/Figs/OverallImportance_",snp.sets.codes[[counter]],".pdf"))
+# plot(gf, plot.type="Overall.Importance")
+# dev.off()
+# 
+# # mean(gf$result)
+# # sd(gf$result)
+# 
+# pdf(paste0("outputs/GF/ModelRuns/Figs/CumulativeImportance_",snp.sets.codes[[counter]],".pdf"))
+# layout(matrix(1:12,4,3))
+# # MEM 1
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="MEM1",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Moran''s eigenvectors 1", font=2,cex=0.8,adj=1)
+# 
+# # MEM 2
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="MEM2",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Moran''s eigenvectors 2", font=2,cex=0.8,adj=1)
+# 
+# # MEM 3
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="MEM3",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Moran''s eigenvectors 3", font=2,cex=0.8,adj=1)
+# 
+# # MEM 4
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="MEM4",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Moran''s eigenvectors 4", font=2,cex=0.8,adj=1)
+# 
+# # Max T° of the warmest month (C°)
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="bio5",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Max T° of the warmest month (C°)", font=2,cex=0.8,adj=1)
+# 
+# # Min T° of the coldest month (°C)
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="bio6",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Min T° of the coldest month (°C)", font=2,cex=0.8,adj=1)
+# 
+# # Annual precipitation (mm)
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="bio12",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Annual precipitation (mm)", font=2,cex=0.8,adj=1)
+# 
+# # Precipitation seasonality (coeff of variation)
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="bio15",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Precipitation seasonality (coeff of variation)", font=2,cex=0.8,adj=1)
+# 
+# # Total available water content (mm)
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="water_top",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Total available water content (mm)", font=2,cex=0.8,adj=1)
+# 
+# # Depth available to roots (cm)
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="depth_roots",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Depth available to roots (cm)", font=2,cex=0.8,adj=1)
+# 
+# # TRI
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="TRI",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Topographic Ruggedness Index", font=2,cex=0.8,adj=1)
+# 
+# # Burned Area
+# plot(gf, plot.type="Cumulative.Importance",
+#      imp.vars="BurnedArea",
+#      plot.args=list(show.species=FALSE,show.overall=TRUE))
+# mtext(side=1, line=3.5, "Burned Area", font=2,cex=0.8,adj=1)
+# dev.off()
+# 
+# 
+# # Summary figure
+# by.importance <- names(importance(gf))
+# pdf(paste0("outputs/GF/ModelRuns/Figs/CumulativeImportance_AllCovariates_",snp.sets.codes[[counter]],".pdf"))
+# plot(gf, 
+#      plot.type = "C",
+#      imp.vars = by.importance, 
+#      show.species = F, 
+#      common.scale = T,
+#      cex.lab = 0.7, 
+#      cex.legend = 0.4, 
+#      cex.axis = 0.6, 
+#      line.ylab = 0.9, 
+#      par.args = list(mgp = c(1.5, 0.5, 0), mar = c(2.5, 1, 0.1, 0.5), omi = c(0, 0.3, 0, 0)))
+# dev.off()
 
 
 ## Projection under the current climate
@@ -1036,6 +1076,225 @@ CalculateGOGF(rast.fut=stackFutClimSSP585,    # Scenario SSP5-8.5
 })
 ```
 
+# Tables and figs for manuscript and SI
+
+## GDM
+
+```{r TableGDMPerf}
+set.names <- c("Ref","Mer","Mid","Com")
+
+out <- set.names %>% sapply(function(x){
+  
+  
+  out.list <- readRDS(paste0("outputs/GDM/ModelRuns/Outputs/",x,".rds"))
+  out.list <- out.list[c("performance","var.imptance")] %>% 
+    sapply(as.data.frame, USE.NAMES = TRUE,simplify=FALSE) 
+  out.list$var.imptance <- t(out.list$var.imptance) %>% as_tibble() #%>% mutate(set=x)
+  out.list$performance <- as_tibble(out.list$performance)# %>% mutate(set=x)
+  out.list %>%  bind_cols()
+  
+  }, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  bind_rows(.id="SNPSets")
+
+out %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Generate the latex table
+print(xtable(out, type = "latex",digits=2), 
+      file = "outputs/GDM/ModelRuns/Outputs/GDMperformance.tex", 
+      include.rownames=FALSE)
+```
+
+```{r FigGDMISplines, fig.width=20,fig.height=16}
+out <- set.names %>% sapply(function(x){
+  
+  
+  readRDS(paste0("outputs/GDM/ModelRuns/Outputs/",x,".rds")) %>% 
+    extract2("splines") %>% 
+    sapply(function(i) as.data.frame(i) %>% mutate(ID=1:nrow(.)), USE.NAMES = TRUE,simplify=FALSE) %>% 
+    bind_rows(.id="xy") %>% 
+    pivot_wider(names_from = xy,values_from=all_of(c("Geographic",select.var)))
+  
+  }, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  bind_rows(.id="SNPSets") %>% 
+  mutate(SNPSets=factor(SNPSets,levels=c("Com","Mid","Mer","Ref")))
+
+
+limits <- c(0,0.8)
+size.x.axis <- 14
+size.text.legend <- 12
+size.title.legend <- 14
+
+p1 <- out %>% ggplot(aes(x=Geographic_x, y=Geographic_y, color=SNPSets)) +
+  geom_line(size=2) +
+  scale_color_manual(values=c("#e66101", "#fdb863", "#b2abd2", "#5e3c99"),
+                     labels=c("Common candidates",
+                              "Candidates under expected strong selection",
+                              "Merged candidates",
+                              "Reference SNPs")) +
+  xlab("Geographical distance") + 
+  ylab("Genomic distance") +
+  labs(color="Sets of SNPs") +
+  ylim(limits) +
+  theme_bw() + 
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=size.x.axis),
+        legend.text = element_text(size=size.text.legend),
+        legend.title = element_text(size=size.title.legend))
+
+legend <- get_legend(p1)
+p1 <- p1 + theme(legend.position = "none")
+
+p2 <- out %>% ggplot(aes(x=bio5_x, y=bio5_y, color=SNPSets)) +
+  geom_line(size=2) +
+  scale_color_manual(values=c("#e66101", "#fdb863", "#b2abd2", "#5e3c99"),
+                     labels=c("Common candidates",
+                              "Candidates under expected strong selection",
+                              "Merged candidates",
+                              "Reference SNPs")) +
+  xlab("Max T° warmest month (C°)") + 
+  ylab("") +
+  theme_bw() + 
+  ylim(limits) +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=size.x.axis),
+        legend.position = "none")
+
+
+p3 <- out %>% ggplot(aes(x=bio6_x, y=bio6_y, color=SNPSets)) +
+  geom_line(size=2) +
+  scale_color_manual(values=c("#e66101", "#fdb863", "#b2abd2", "#5e3c99"),
+                     labels=c("Common candidates",
+                              "Candidates under expected strong selection",
+                              "Merged candidates",
+                              "Reference SNPs")) +
+  xlab("Min T° coldest month (C°)") + 
+  ylab("") +
+  theme_bw() + 
+  ylim(limits) +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=size.x.axis),
+        legend.position = "none")
+
+p4 <- out %>% ggplot(aes(x=bio12_x, y=bio12_y, color=SNPSets)) +
+  geom_line(size=2) +
+  scale_color_manual(values=c("#e66101", "#fdb863", "#b2abd2", "#5e3c99"),
+                     labels=c("Common candidates",
+                              "Candidates under expected strong selection",
+                              "Merged candidates",
+                              "Reference SNPs")) +
+  xlab("Annual precipitation (mm)") + 
+  ylab("") +
+  theme_bw() + 
+  ylim(limits) +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=size.x.axis),
+        legend.position = "none")
+
+p5 <- out %>% ggplot(aes(x=bio15_x, y=bio15_y, color=SNPSets)) +
+  geom_line(size=2) +
+  scale_color_manual(values=c("#e66101", "#fdb863", "#b2abd2", "#5e3c99"),
+                     labels=c("Common candidates",
+                              "Candidates under expected strong selection",
+                              "Merged candidates",
+                              "Reference SNPs")) +
+  xlab("Prec. seasonality (coeff of variation)") + 
+  ylab("Genomic distance") +
+  theme_bw() + 
+  ylim(limits) +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=size.x.axis),
+        legend.position = "none")
+
+p6 <- out %>% ggplot(aes(x=water_top_x, y=water_top_y, color=SNPSets)) +
+  geom_line(size=2) +
+  scale_color_manual(values=c("#e66101", "#fdb863", "#b2abd2", "#5e3c99"),
+                     labels=c("Common candidates",
+                              "Candidates under expected strong selection",
+                              "Merged candidates",
+                              "Reference SNPs")) +
+  xlab("Total available water content (mm)") + 
+  ylab("") +
+  theme_bw() + 
+  ylim(limits) +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=size.x.axis),
+        legend.position = "none")
+
+p7 <- out %>% ggplot(aes(x=depth_roots_x, y=depth_roots_y, color=SNPSets)) +
+  geom_line(size=2) +
+  scale_color_manual(values=c("#e66101", "#fdb863", "#b2abd2", "#5e3c99"),
+                     labels=c("Common candidates",
+                              "Candidates under expected strong selection",
+                              "Merged candidates",
+                              "Reference SNPs")) +
+  xlab("Depth available to roots (cm)") + 
+  ylab("") +
+  theme_bw() + 
+  ylim(limits) +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=size.x.axis),
+        legend.position = "none")
+
+p8 <- out %>% ggplot(aes(x=TRI_x, y=TRI_y, color=SNPSets)) +
+  geom_line(size=2) +
+  scale_color_manual(values=c("#e66101", "#fdb863", "#b2abd2", "#5e3c99"),
+                     labels=c("Common candidates",
+                              "Candidates under expected strong selection",
+                              "Merged candidates",
+                              "Reference SNPs")) +
+  xlab("Topographic Ruggedness Index (m)") + 
+  ylab("") +
+  theme_bw() + 
+  ylim(limits) +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=size.x.axis),
+        legend.position = "none")
+
+p9 <- out %>% ggplot(aes(x=BurnedArea_x, y=BurnedArea_y, color=SNPSets)) +
+  geom_line(size=2) +
+  scale_color_manual(values=c("#e66101", "#fdb863", "#b2abd2", "#5e3c99"),
+                     labels=c("Common candidates",
+                              "Candidates under expected strong selection",
+                              "Merged candidates",
+                              "Reference SNPs")) +
+  xlab("Burned area (hectares)") + 
+  ylab("") +
+  theme_bw() + 
+  ylim(limits) +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=size.x.axis),
+        legend.position = "none")
+
+
+fig <- plot_grid(p1,p2,p3,p4,legend,p5,p6,p7,p8,p9,nrow=2)
+
+# For latex:
+ggsave(plot=fig,
+       filename="outputs/GDM/ModelRuns/Figs/SummaryISplines.pdf",
+       height = 12,
+       width=20,
+       device="pdf")
+
+# For google docs:
+ggsave(plot=fig,
+       filename="outputs/GDM/ModelRuns/Figs/SummaryISplines.png",
+       height = 12,
+       width=20)
+
+fig
+```
 
 
 `r knitr::opts_chunk$set(eval = F)`
