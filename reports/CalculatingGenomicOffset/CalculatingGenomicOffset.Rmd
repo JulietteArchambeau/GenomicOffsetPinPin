@@ -96,7 +96,7 @@ background <- raster("data/maps/Hillshade/background.grd")
 ```
 
 
-## Environmntal data
+## Environmental data
 
 We load the environmental data:
 
