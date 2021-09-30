@@ -388,7 +388,7 @@ dev.off()
 ```
 
 
-```{r GDManalyses,eval=F}
+```{r GDManalyses,eval=T}
 # We use a counter to refer to the different sets of SNPs:
 # set 1 (1st iteration) => reference SNPs
 # set 2 (2nd iteration) => merged candidates
@@ -630,8 +630,9 @@ rasValue <- na.omit(rasValue)
 lapply(c("SSP370","SSP585"), function(x){
   
   rast.go[rasValue$cell] <- dfGO[,x]
-  
-pdf(paste0("outputs/GDM/GenomicOffset/MapGenomicOffset_",x,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
+
+# Figures with the same scale:
+pdf(paste0("outputs/GDM/GenomicOffset/MapGenomicOffset_FixedScale_",x,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
 plot(background,col=grayscale_colors, 
      axes=FALSE,
      #main=paste0("Genomic offset - ",x),
@@ -640,6 +641,18 @@ plot(rast.go,box = FALSE,
      axes = FALSE,
      col=colorRampPalette(c("blue","yellow","red"))(255),
      zlim=c(0,0.4),
+     add=T,
+     bgalpha=0)
+dev.off()  
+
+# Figures with different scales:
+pdf(paste0("outputs/GDM/GenomicOffset/MapGenomicOffset_VaryingScale_",x,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
+plot(background,col=grayscale_colors, 
+     axes=FALSE,
+     legend=F)
+plot(rast.go,box = FALSE,
+     axes = FALSE,
+     col=colorRampPalette(c("blue","yellow","red"))(255),
      add=T,
      bgalpha=0)
 dev.off()  
@@ -834,7 +847,9 @@ GO <- sqrt((proj.cur[,1]-proj.fut[,1])^2 + (proj.cur[,2]-proj.fut[,2])^2
 rast.go <- stackFutClimSSP370[[1]]
 rast.go[rasValue$cell] <- GO
 
-pdf(paste0("outputs/GF/GenomicOffset/MapGenomicOffset_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
+
+# Figures with the same scale:
+pdf(paste0("outputs/GF/GenomicOffset/MapGenomicOffset_FixedScale_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
 plot(background,col=grayscale_colors, 
      axes=FALSE,
      #main=paste0("Genomic offset - ",scenario),
@@ -846,7 +861,21 @@ plot(rast.go,
      zlim=c(0,0.055),
      col=colorRampPalette(c("blue","yellow","red"))(255),
      bgalpha=0)
-dev.off() 
+dev.off()
+
+
+# Figures with different scales:
+pdf(paste0("outputs/GF/GenomicOffset/MapGenomicOffset_VaryingScale_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
+plot(background,col=grayscale_colors, 
+     axes=FALSE,
+     legend=F)
+plot(rast.go,
+     box = FALSE,
+     axes = FALSE,
+     add=T,
+     col=colorRampPalette(c("blue","yellow","red"))(255),
+     bgalpha=0)
+dev.off()
 
 
 
