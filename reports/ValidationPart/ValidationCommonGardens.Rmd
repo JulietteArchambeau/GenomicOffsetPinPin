@@ -309,13 +309,17 @@ p <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsMortality
       legend.text=element_text(size=10),
       legend.position = "bottom",
       legend.background = element_rect(colour = "grey"),
-      strip.text.x = element_text(size = 14),
-      strip.text.y = element_text(size=12,angle = 0),
+      strip.text.x = element_text(size = 16),
+      strip.text.y = element_text(size=16,angle = 0),
+      strip.background = element_blank(),
       panel.grid.minor.x=element_blank(),
       panel.grid.major.x=element_blank()) +
     guides(color=guide_legend(ncol=2))
   
-ggsave(p,file=paste0("outputs/ValidationCG/Figs/MortalityModels/SummaryFigures/",index.match[[index]][[1]],".pdf"),device="pdf")
+ggsave(p,file=paste0("outputs/ValidationCG/Figs/MortalityModels/SummaryFigures/",index.match[[index]][[1]],".pdf"),
+       device="pdf",
+       height=9,
+       width=10)
 })
 ```
 
@@ -621,8 +625,9 @@ index.match <- list(R_squared=c("R2","Goodness of fit ($R^{2}$ estimate)"),
                     betaX1=c("betaX1","Genomic offset effect ($\\beta_{X1}$ estimate)"))
 
 lapply(c("betaX1","R_squared"),function(index){
-  
-p <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsHeightModels_",PopStructure,".rds")) %>% 
+
+
+pdf <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsHeightModels_",PopStructure,".rds")) %>% 
   filter(term==index) %>% 
   mutate(Method=case_when(str_detect(variable,"CTD")==TRUE~"Climatic transfer distance",
                           str_detect(variable,"GDM")==TRUE~"Genomic offset",
@@ -631,12 +636,36 @@ p <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsHeightMod
                              str_detect(variable,"GDM")==TRUE~"GDM",
                           str_detect(variable,"GF")==TRUE~"GF"),
          Variable=case_when(str_detect(variable,"CTD")==TRUE~str_sub(variable,5,-1),
-                            str_detect(variable,"GO")==TRUE~str_sub(variable,4,6))) %>% 
-  
+                            str_detect(variable,"GO")==TRUE~str_sub(variable,4,6)),
+         Site.labels=case_when(str_detect(site,"MAD")~"Madrid",
+                               str_detect(site,"CAC")~"Cáceres",
+                               str_detect(site,"BDX")~"Bordeaux",
+                               str_detect(site,"POR")~"Portugal",
+                               str_detect(site,"AST")~"Asturias"),
+         Age=case_when(site=="MAD_htdec11"~ "(13 months)",
+                       site=="CAC_htdec11"~ "(8 months)",
+                       site=="BDX_htnov13"~ "(25 months)",
+                       site=="BDX_htnov18"~ "(85 months)",
+                       site=="POR_htjan12"~ "(11 months old)",
+                       site=="POR_htmay13"~ "(27 months old)",
+                       site=="AST_htdec11"~ "(10 months old)",
+                       site=="AST_htmar14"~ "(37 months old)"),
+         
+         Site.Age.labels=case_when(site=="MAD_htdec11"~ "Madrid (13 months)",
+                                   site=="CAC_htdec11"~ "Cáceres (8 months)",
+                                   site=="BDX_htnov13"~ "Bordeaux (25 months)",
+                                   site=="BDX_htnov18"~ "Bordeaux (85 months)",
+                                   site=="POR_htjan12"~ "Portugal (11 months old)",
+                                   site=="POR_htmay13"~ "Portugal (27 months old)",
+                                   site=="AST_htdec11"~ "Asturias (10 months old)",
+                                   site=="AST_htmar14"~ "Asturias (37 months old)")) 
+
+# All combinations site/age: 
+p <- pdf %>% 
   ggplot(aes(x = Variable, y = estimate,ymin = conf.low, ymax = conf.high,colour=Method.GO,shape=Method.GO)) +#
   geom_hline(yintercept = 0,color="gray") +
   geom_pointinterval(position = position_dodge(width = .4),point_size=3,size=2,show.legend = c(size = TRUE)) +
-  facet_grid(site~Method,scales="free_x", space = "free") + 
+  facet_grid(Site.Age.labels~Method,scales="free_x", space = "free") + 
   ylab(TeX(index.match[[index]][[2]])) + xlab("") +
   scale_colour_manual(values=c("mediumpurple1","turquoise2","forestgreen"),
                       breaks = c('GF', 'GDM')) +
@@ -654,11 +683,53 @@ p <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsHeightMod
       strip.text.x = element_text(size = 14),
       strip.text.y = element_text(size=12,angle = 0),
       panel.grid.minor.x=element_blank(),
-      panel.grid.major.x=element_blank()) +
+      panel.grid.major.x=element_blank(),
+      strip.background = element_blank()) +
     guides(color=guide_legend(ncol=2))
   
-ggsave(p,file=paste0("outputs/ValidationCG/Figs/HeightModels/SummaryFigures/",index.match[[index]][[1]],"_",PopStructure,".pdf"),device="pdf")
+ggsave(p,
+       file=paste0("outputs/ValidationCG/Figs/HeightModels/SummaryFigures/",index.match[[index]][[1]],"_",PopStructure,".pdf"),
+       device="pdf",
+       width=9,
+       height=15)
+
+# One age per site:
+p <- pdf %>% 
+  filter(!(site %in% c("BDX_htnov13","POR_htjan12","AST_htdec11"))) %>%  
+  ggplot(aes(x = Variable, y = estimate,ymin = conf.low, ymax = conf.high,colour=Method.GO,shape=Method.GO)) +#
+  geom_hline(yintercept = 0,color="gray") +
+  geom_pointinterval(position = position_dodge(width = .4),point_size=3,size=2,show.legend = c(size = TRUE)) +
+  facet_grid(Site.labels~Method,scales="free_x", space = "free") + 
+  ylab(TeX(index.match[[index]][[2]])) + xlab("") +
+  scale_colour_manual(values=c("mediumpurple1","turquoise2","forestgreen"),
+                      breaks = c('GF', 'GDM')) +
+  scale_shape_manual(values = c(15, 16,17),
+                     breaks = c('GF', 'GDM')) +
+  theme_bw() +
+  labs(color="Genomic offset methodology:",shape="Genomic offset methodology:") +
+  theme(axis.text.x = element_text(size=13),
+        axis.text.y = element_text(size=13),
+        axis.title = element_text(size=16),
+      legend.title=element_text(size=13), 
+      legend.text=element_text(size=10),
+      legend.position = "bottom",
+      legend.background = element_rect(colour = "grey"),
+      strip.text.x = element_text(size = 14),
+      strip.text.y = element_text(size=12,angle = 0),
+      panel.grid.minor.x=element_blank(),
+      panel.grid.major.x=element_blank(),
+      strip.background = element_blank()) +
+    guides(color=guide_legend(ncol=2))
+
+ggsave(p,
+       file=paste0("outputs/ValidationCG/Figs/HeightModels/SummaryFigures/",index.match[[index]][[1]],"_",PopStructure,"_Reduced.pdf"),
+       device="pdf",
+       width=9,
+       height=12)
+  
+
 })
+
 ```
 
 # References
