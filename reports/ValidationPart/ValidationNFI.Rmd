@@ -278,6 +278,7 @@ p <-  DF.go %>%
   
   ggplot(aes(x = SNPSets, y = estimate,ymin = conf.low, ymax = conf.high,colour=Scenario,shape=Scenario)) +
   geom_pointinterval(position = position_dodge(width = .6),point_size=2.5,size=2,show.legend = c(size = TRUE)) +
+  geom_hline(yintercept = 0,color="gray") +
   facet_grid(.~Model,scales="free", space = "free") + 
   ylab(TeX("$\\beta_{GO}$ estimates")) + xlab("") +
   scale_colour_manual(values=c("darkviolet","orange1")) +
@@ -300,7 +301,8 @@ p <-  DF.go %>%
 graphs[[2]] <- graphs[[2]] + theme(legend.position = "none")
 
 grid.graphs <- plot_grid(graphs[[1]],graphs[[2]],nrow=2,labels=c("A)","B)"))
-ggsave(grid.graphs, file="figs/manuscript/ValidationNFI.pdf",device="pdf")
+ggsave(grid.graphs, file="figs/manuscript/ValidationNFI.pdf",device="pdf",height=8,width=10)
+ggsave(grid.graphs, file="figs/manuscript/ValidationNFI.png",height=8,width=10)
 grid.graphs 
 ```
 
