@@ -388,7 +388,7 @@ dev.off()
 ```
 
 
-```{r GDManalyses,eval=T}
+```{r GDManalyses,eval=F}
 # We use a counter to refer to the different sets of SNPs:
 # set 1 (1st iteration) => reference SNPs
 # set 2 (2nd iteration) => merged candidates
@@ -424,33 +424,54 @@ perf <- data.frame(ExpDev=gdm.mod$explained)
 
 
 # Cross-validation with 9 folds
+dcv <- sapply(1:100,function(i){
 repeat{
   result <- tryCatch(sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T),warning = function(w) w )
-  if (inherits(result,"warning")) next  # For warnings - continue the next iteration
-  if (inherits(result,"error")) next  # For warnings - continue the next iteration
+  if (inherits(result,"warning")) next   # For warnings - continue the next iteration
+  if (inherits(result,"error")) next     # For warnings - continue the next iteration
   else break( result )                   # If no warnings - stop
 }
-perf[,"CV9"] <- result
+  result
+})
+perf[,"CV9_mean"] <- mean(dcv)
+perf[,"CV9_sd"] <- sd(dcv)
+
+# repeat{
+#   result <- tryCatch(sgdm::gdm.cv(gdmTab,nfolds = 9,performance = "r2",geo=T),warning = function(w) w )
+#   if (inherits(result,"warning")) next   # For warnings - continue the next iteration
+#   if (inherits(result,"error")) next     # For warnings - continue the next iteration
+#   else break( result )                   # If no warnings - stop
+# }
+# perf[,"CV9"] <- result
 
 
 # Cross-validation with 6 folds
+dcv <- sapply(1:100,function(i){
 repeat{
   result <- tryCatch(sgdm::gdm.cv(gdmTab,nfolds = 6,performance = "r2",geo=T),warning = function(w) w )
-  if (inherits(result,"warning")) next  # For warnings - continue the next iteration
-  if (inherits(result,"error")) next  # For warnings - continue the next iteration
+  if (inherits(result,"warning")) next   # For warnings - continue the next iteration
+  if (inherits(result,"error")) next     # For warnings - continue the next iteration
   else break( result )                   # If no warnings - stop
 }
-perf[,"CV6"] <- result
+  result
+})
+perf[,"CV6_mean"] <- mean(dcv)
+perf[,"CV6_sd"] <- sd(dcv)
+
 
 
 # Cross-validation with 2 folds
+dcv <- sapply(1:100,function(i){
 repeat{
   result <- tryCatch(sgdm::gdm.cv(gdmTab,nfolds = 2,performance = "r2",geo=T),warning = function(w) w )
-  if (inherits(result,"warning")) next  # For warnings - continue the next iteration
-  if (inherits(result,"error")) next  # For warnings - continue the next iteration
+  if (inherits(result,"warning")) next   # For warnings - continue the next iteration
+  if (inherits(result,"error")) next     # For warnings - continue the next iteration
   else break( result )                   # If no warnings - stop
 }
-perf[,"CV2"] <- result
+  result
+})
+perf[,"CV2_mean"] <- mean(dcv)
+perf[,"CV2_sd"] <- sd(dcv)
 
 
 # Predictions on the same data as the one used to fit the model
@@ -459,9 +480,9 @@ gdm.mod.pred <- predict.gdm(gdm.mod, gdmTab)
 # Figure: Predicted vs observed genetic distances
 pdf(paste0("outputs/GDM/ModelRuns/Figs/ObsPred_",snp.sets.codes[[counter]],".pdf"))
 plot(gdmTab$distance, gdm.mod.pred,
-     xlab="Observed genetic distance",
-     ylab="Predicted genetic distance",
-     main=snp.sets.names[[counter]],
+     xlab="Observed genomic distance",
+     ylab="Predicted genomic distance",
+     #main=snp.sets.names[[counter]],
      pch=20, col=rgb(0,0,1,0.5))
 lines(c(-1,2), c(-1,2))
 dev.off()
@@ -935,7 +956,10 @@ SNPs <- df %>% dplyr::select(contains("snp"))
 #saveRDS(gf,file=paste0("outputs/GF/ModelRuns/Models/GFmodel_",snp.sets.codes[[counter]],".rds")) 
 gf <- readRDS(file=paste0("outputs/GF/ModelRuns/Models/GFmodel_",snp.sets.codes[[counter]],".rds"))
 
-
+# Save the mean R^2 of the individual SNP models
+saveRDS(c(mean(gf$result),
+          min(gf$result),
+          max(gf$result)),file=paste0("outputs/GF/ModelRuns/Outputs/",snp.sets.codes[[counter]],".rds"))
 
 # Figures on variable and overall importance
 # ------------------------------------------
@@ -1101,13 +1125,15 @@ CalculateGOGF(rast.fut=stackFutClimSSP585,    # Scenario SSP5-8.5
   inner_join(data.prov[,c("s1.prov","s1.xCoord", "s1.yCoord","s1.bio1")])
   saveRDS(data.pred.gdm,file=paste0("outputs/GF/ExtractedGenomicOffsetCG/CGGO_",snp.sets.codes[[counter]],".rds"))
   
-
 })
 ```
 
 # Tables and figs for manuscript and SI
 
+
 ## GDM
+
+### Table
 
 ```{r TableGDMPerf}
 set.names <- c("Ref","Mer","Mid","Com")
@@ -1135,6 +1161,8 @@ print(xtable(out, type = "latex",digits=2),
       file = "outputs/GDM/ModelRuns/Outputs/GDMperformance.tex", 
       include.rownames=FALSE)
 ```
+
+### Fig
 
 ```{r FigGDMISplines, fig.width=20,fig.height=16}
 out <- set.names %>% sapply(function(x){
@@ -1325,5 +1353,30 @@ ggsave(plot=fig,
 fig
 ```
 
+## GF
+
+
+```{r TableGFPerf}
+set.names <- c("Ref","Mer","Mid","Com")#
+
+
+out <- sapply(set.names, function(x){
+  readRDS(paste0("outputs/GF/ModelRuns/Outputs/",x,".rds"))
+}) %>% 
+  as.data.frame() %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  setNames(c("mean R2","minimum R2","maximum R2"))
+
+
+out %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=11,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Generate the latex table
+print(xtable(out, type = "latex",digits=2), 
+      file = "outputs/GF/ModelRuns/Outputs/GFperformance.tex")
+```
 
 `r knitr::opts_chunk$set(eval = F)`
