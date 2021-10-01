@@ -273,7 +273,7 @@ DF %>%
 
 ```{r SummaryFigsMortalityModels}
 index.match <- list(betaH=c("betaH","Height effect ($\\beta_{H}$ estimate)"),
-                    betaX1=c("betaX1","Genomic offset effect ($\\beta_{X1}$ estimate)"))
+                    betaX1=c("betaX1","Regression coefficients"))
 
 lapply(c("betaX1","betaH"),function(index){
   
@@ -301,7 +301,7 @@ p <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsMortality
   scale_shape_manual(values = c(15, 16,17),
                      breaks = c('GF', 'GDM')) +
   theme_bw() +
-  labs(color="Genomic offset methodology:",shape="Genomic offset methodology:") +
+  labs(color="Genomic offset approach:",shape="Genomic offset approach:") +
   theme(axis.text.x = element_text(size=13),
         axis.text.y = element_text(size=13),
         axis.title = element_text(size=16),
@@ -316,18 +316,26 @@ p <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsMortality
       panel.grid.major.x=element_blank()) +
     guides(color=guide_legend(ncol=2))
   
+# for latex
 ggsave(p,file=paste0("outputs/ValidationCG/Figs/MortalityModels/SummaryFigures/",index.match[[index]][[1]],".pdf"),
        device="pdf",
+       height=9,
+       width=10)
+
+# for google docs
+ggsave(p,file=paste0("outputs/ValidationCG/Figs/MortalityModels/SummaryFigures/",index.match[[index]][[1]],".png"),
        height=9,
        width=10)
 })
 ```
 
 
+## Leave-one out cross validation
+
 ```{r LooMortalityModels}
 lapply(c("caceres","madrid"),function(sel.site){
   
-list.files(paste0("outputs/ValidationCG/Figs/MortalityModels/LOOs"),full.names=TRUE) %>% 
+d <- list.files(paste0("outputs/ValidationCG/Figs/MortalityModels/LOOs"),full.names=TRUE) %>% 
   str_subset(sel.site) %>% 
   sapply(readRDS, USE.NAMES = TRUE,simplify=FALSE) %>% 
   loo_compare() %>% 
@@ -335,10 +343,41 @@ list.files(paste0("outputs/ValidationCG/Figs/MortalityModels/LOOs"),full.names=T
   rownames_to_column(var ="variable") %>% 
   as_tibble() %>% 
   mutate(site=sel.site,
-         variable=str_sub(variable,52,-13))
+         variable=str_sub(variable,52,-12),
+         ModellingApproach=case_when(str_detect(variable,"GF")~"GF-based genomic offset",
+                                     str_detect(variable,"GDM")~"GDM-based genomic offset",
+                                     str_detect(variable,"CTD")~"Climatic transfer distance"),
+         Covariate=case_when(str_detect(variable,"Mid")~"Candidates under expected strong selection",
+                             str_detect(variable,"Mer")~"Merged candidates",
+                             str_detect(variable,"Com")~"Common candidates",
+                             str_detect(variable,"Ref")~"Reference candidates",
+                             str_detect(variable,"bio5")~"bio5 - Max T° of the warmest month (°C)",
+                             str_detect(variable,"bio6")~"bio6 - Min T° of the coldest month (°C)",
+                             str_detect(variable,"bio12")~"bio12 - Annual precipitation (mm)",
+                             str_detect(variable,"bio15")~"bio15 - Precipitation seasonality (coeff of variation)",
+                             str_detect(variable,"bio1")~"bio1 - Annual daily mean T° (°C)")) %>% 
+    dplyr::select(ModellingApproach,Covariate,elpd_diff,se_diff)
+
+print(xtable(d,type = "latex",digits=2), 
+      file = paste0("outputs/ValidationCG/TablesLOOs/MortalityLoos_",sel.site,".tex"), 
+      include.rownames=FALSE)
+
+d
   
 })
 ```
+
+**How to interpret the outputs from `loo_compare` function?**
+
+- [How to use cross-validation for model selection? in the Cross-validation FAQ of Aki Vehtari](https://avehtari.github.io/modelselection/CV-FAQ.html#how-to-use-cross-validation-for-model-selection)
+
+
+"If there is no application specific utility or loss function, use log score, i.e. elpd. **If elpd difference** (`elpd_diff` in `loo` package) **is less than 4, the difference is small**. If elpd difference is larger than 4, then compare that difference to standard error of `elpd_diff` (provided e.g. by `loo` package)."
+
+- [Interpreting output from compare() of loo](https://discourse.mc-stan.org/t/interpreting-output-from-compare-of-loo/3380/2)
+
+
+"it’s better to consider something like 2SE or more cautious 4SE, where 4 comes from the fact that SE for LOO can be underestimated for small n or under bad model misspecification.""
 
 ## Experimental design
 
@@ -622,7 +661,7 @@ DF %>%
 
 ```{r SummaryFigsHeightModels,fig.height=12,fig.width=12}
 index.match <- list(R_squared=c("R2","Goodness of fit ($R^{2}$ estimate)"),
-                    betaX1=c("betaX1","Genomic offset effect ($\\beta_{X1}$ estimate)"))
+                    betaX1=c("betaX1","Regression coefficients"))
 
 lapply(c("betaX1","R_squared"),function(index){
 
@@ -637,6 +676,7 @@ pdf <- readRDS(file=paste0("outputs/ValidationCG/TablesPosteriors/OutputsHeightM
                           str_detect(variable,"GF")==TRUE~"GF"),
          Variable=case_when(str_detect(variable,"CTD")==TRUE~str_sub(variable,5,-1),
                             str_detect(variable,"GO")==TRUE~str_sub(variable,4,6)),
+         Variable=factor(Variable,levels=c(paste0("bio",c(1,5,6,12,15)),"Com","Mid","Mer","Ref")),
          Site.labels=case_when(str_detect(site,"MAD")~"Madrid",
                                str_detect(site,"CAC")~"Cáceres",
                                str_detect(site,"BDX")~"Bordeaux",
@@ -672,7 +712,7 @@ p <- pdf %>%
   scale_shape_manual(values = c(15, 16,17),
                      breaks = c('GF', 'GDM')) +
   theme_bw() +
-  labs(color="Genomic offset methodology:",shape="Genomic offset methodology:") +
+  labs(color="Genomic offset approach:",shape="Genomic offset approach:") +
   theme(axis.text.x = element_text(size=13),
         axis.text.y = element_text(size=13),
         axis.title = element_text(size=16),
@@ -706,7 +746,7 @@ p <- pdf %>%
   scale_shape_manual(values = c(15, 16,17),
                      breaks = c('GF', 'GDM')) +
   theme_bw() +
-  labs(color="Genomic offset methodology:",shape="Genomic offset methodology:") +
+  labs(color="Genomic offset approach:",shape="Genomic offset approach:") +
   theme(axis.text.x = element_text(size=13),
         axis.text.y = element_text(size=13),
         axis.title = element_text(size=16),
@@ -721,9 +761,16 @@ p <- pdf %>%
       strip.background = element_blank()) +
     guides(color=guide_legend(ncol=2))
 
+# for latex
 ggsave(p,
        file=paste0("outputs/ValidationCG/Figs/HeightModels/SummaryFigures/",index.match[[index]][[1]],"_",PopStructure,"_Reduced.pdf"),
        device="pdf",
+       width=9,
+       height=12)
+
+# for google docs:
+ggsave(p,
+       file=paste0("outputs/ValidationCG/Figs/HeightModels/SummaryFigures/",index.match[[index]][[1]],"_",PopStructure,"_Reduced.png"),
        width=9,
        height=12)
   
@@ -731,6 +778,47 @@ ggsave(p,
 })
 
 ```
+
+## Leave-one-out cross validation
+
+
+```{r LooHeightModels}
+sites <- c("MAD_htdec11","CAC_htdec11","BDX_htnov13","BDX_htnov18","POR_htjan12","POR_htmay13","AST_htdec11","AST_htmar14")
+
+sapply(sites,function(sel.site){
+  
+d <- list.files(paste0("outputs/ValidationCG/Figs/HeightModels/LOOs"),full.names=TRUE) %>% 
+  str_subset(sel.site) %>% 
+  sapply(readRDS, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  loo_compare() %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var ="variable") %>% 
+  as_tibble() %>% 
+  mutate(site=sel.site,
+         variable=str_sub(variable,49,-17),
+         ModellingApproach=case_when(str_detect(variable,"GF")~"GF-based genomic offset",
+                                     str_detect(variable,"GDM")~"GDM-based genomic offset",
+                                     str_detect(variable,"CTD")~"Climatic transfer distance"),
+         Covariate=case_when(str_detect(variable,"Mid")~"Candidates under expected strong selection",
+                             str_detect(variable,"Mer")~"Merged candidates",
+                             str_detect(variable,"Com")~"Common candidates",
+                             str_detect(variable,"Ref")~"Reference candidates",
+                             str_detect(variable,"bio5")~"bio5 - Max T° of the warmest month (°C)",
+                             str_detect(variable,"bio6")~"bio6 - Min T° of the coldest month (°C)",
+                             str_detect(variable,"bio12")~"bio12 - Annual precipitation (mm)",
+                             str_detect(variable,"bio15")~"bio15 - Precipitation seasonality (coeff of variation)",
+                             str_detect(variable,"bio1")~"bio1 - Annual daily mean T° (°C)")) %>% 
+    dplyr::select(ModellingApproach,Covariate,elpd_diff,se_diff)
+
+print(xtable(d,type = "latex",digits=2), 
+      file = paste0("outputs/ValidationCG/TablesLOOs/HeightLoos_",sel.site,".tex"), 
+      include.rownames=FALSE)
+
+d
+  
+}, USE.NAMES = TRUE,simplify=FALSE)
+```
+
 
 # References
 
