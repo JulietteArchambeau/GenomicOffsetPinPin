@@ -1,0 +1,193 @@
+---
+title: "Visualizing spatial differences between current and future climates"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=T)
+options(width = 300)
+library(knitr)
+library(reshape2)
+library(ggbiplot)
+library(dplyr)
+#library(devtools)
+#library(xtable)
+library(tidyverse)
+library(raster)
+library(rgeos)
+library(kableExtra)
+```
+
+```{r FuntionsOptionsUsed,echo=F}
+# Gray scale
+grayscale_colors <- gray.colors(100,            # number of different color levels
+                                start = 0.0,    # how black (0) to go
+                                end = 1.0,      # how white (1) to go
+                                gamma = 2.2,    # correction between how a digital
+                                # camera sees the world and how human eyes see it
+                                alpha = NULL)
+```
+
+
+# Load data
+
+## Mapping
+
+For the maps, we need:
+
+  - the maritime pine distribution that we will use as a mask in the maps.
+  
+  - and hillshade for the background.
+
+```{r LoadMapping}
+PinpinDistri  <- shapefile('data/maps/MaskPinpinDistri/PinpinDistriEUforgen_NFIplotsBuffer10km.shp')
+background <- raster("data/maps/Hillshade/background.grd")
+```
+
+
+## Environmental data
+
+We load the environmental data:
+
+  - a raster of environmental variables with **current** climate and with **resolution ~ 30.869 km2** (2.5 minutes) (5.556 x 5.556 at the equator), named: `stackCurrClim`.
+  
+  - a raster of environmental variables with **future** climate under scenario **SSP3-7.0** and with **resolution ~ 30.869 km2** (2.5 minutes), named: `stackFutClimSSP370`.
+    
+  - a raster of environmental variables with **future** climate under scenario **SSP5-8.5** and with **resolution ~ 30.869 km2** (2.5 minutes), named: `stackFutClimSSP585`.
+  
+
+```{r LoadEnvData}
+stackCurrClim <- stack("data/StacksEnvVars/Stack_CurrentClimate_Res25minutes.grd")
+stackFutClimSSP370 <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP370/StackGCMsAvg.grd")
+stackFutClimSSP585 <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP585/StackGCMsAvg.grd")
+```
+
+# Current vs SSP3-7.0
+
+```{r CreatingMapsSSP370}
+vars <- c("bio5","bio6","bio12","bio15")
+
+lapply(vars, function(x){
+minv <- min(c(min(values(stackCurrClim[[x]]),na.rm=T),min(values(stackFutClimSSP370[[x]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClim[[x]]),na.rm=T),max(values(stackFutClimSSP370[[x]]),na.rm=T)))
+
+pdf(paste0("outputs/DiffEnvCurrentFutureClimate/SSP370/",x,".pdf"),height=12,width=12)
+layout(matrix(1:4,2,2))
+
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current")
+plot(stackCurrClim[[x]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future")
+plot(stackFutClimSSP370[[x]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+diff <- overlay(stackFutClimSSP370[[x]],
+                stackCurrClim[[x]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(diff,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+diff <- overlay(stackFutClimSSP370[[x]],
+                stackCurrClim[[x]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(diff,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+dev.off()
+})
+```
+
+
+
+# Current vs SSP5-8.5
+
+```{r CreatingMaps570}
+vars <- c("bio5","bio6","bio12","bio15")
+
+lapply(vars, function(x){
+minv <- min(c(min(values(stackCurrClim[[x]]),na.rm=T),min(values(stackFutClimSSP585[[x]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClim[[x]]),na.rm=T),max(values(stackFutClimSSP585[[x]]),na.rm=T)))
+
+pdf(paste0("outputs/DiffEnvCurrentFutureClimate/SSP585/",x,".pdf"),height=12,width=12)
+layout(matrix(1:4,2,2))
+
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current")
+plot(stackCurrClim[[x]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# future
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future")
+plot(stackFutClimSSP585[[x]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# absolute difference
+diff <- overlay(stackFutClimSSP585[[x]],
+                stackCurrClim[[x]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
+plot(diff,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+
+# percentage of change. 
+diff <- overlay(stackFutClimSSP585[[x]],
+                stackCurrClim[[x]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw future and current")
+plot(diff,
+     add=T,
+     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+dev.off()
+})
+```
+
