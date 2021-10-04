@@ -542,6 +542,29 @@ DFint <- sapply(vars,function(x){
 PopStructure <- "NotAccountingPopStructure" # AccountingPopStructure or NotAccountingPopStructure
 ```
 
+```{r FunctionVizLinearAsso}
+# Function to visualize the linear association between BLUPs for height and variable of interest (GO or CTD)
+plot_predictions <- function(mod,stanlist) {
+  pred <- mod %>% 
+    spread_draws(mu[i], muhat[i]) %>%
+    mean_qi %>%
+    mutate(X = stanlist$X,
+           H = stanlist$H) %>%
+    arrange(X)
+  ggplot(pred) +
+    geom_ribbon(aes(X, ymin = muhat.lower, ymax = muhat.upper), alpha = .1) +
+    geom_ribbon(aes(X, ymin = mu.lower, ymax = mu.upper), alpha = .2, fill = 'red') +
+    geom_line(aes(X, mu)) +
+    geom_point(aes(X, H), shape = 1, color = 'dodgerblue4', alpha = 1) +
+    ylab('BLUPs for height') + 
+    xlab(TeX("Mean-centered $X_p$")) +
+    theme_bw() + 
+    theme(axis.text.x = element_text(size=13),
+          axis.text.y = element_text(size=13),
+          axis.title = element_text(size=16))
+}
+```
+
 
 ```{r RunHeightModels, eval=F}
 # List of height measurements we look at:
@@ -591,6 +614,13 @@ DFint <- sapply(vars,function(x){
 
   # Running the model with rstan
   mstan <- sampling(stancode, data = stanlist, iter = 2000, chains = 4, cores = 4) 
+  
+  
+  # Visualization linear association:
+  ggsave(plot_predictions(mod=mstan,stanlist=stanlist),
+         file = paste0("outputs/ValidationCG/Figs/HeightModels/LinearAsso/",vars[[counter]],"_",sel.site,".pdf"),
+         height = 6,width=8,
+         device="pdf")
   
   # Calculating  the LOO to compare the models
   loo.mstan <- loo(mstan)
