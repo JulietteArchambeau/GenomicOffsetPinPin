@@ -351,7 +351,9 @@ rast3[mapCells] <- scalB
 outRast <- stack(rast1, rast2, rast3)
 
 # Map of the projected current genetic composition
-pdf(paste0("outputs/GDM/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
+pdf(paste0("outputs/GDM/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM.pdf"), 
+    width=48.5, height=50)
+par(mar=c(2.5,0.45,1.5,0.45)+0.1)
 plot(background,
      col=grayscale_colors,
      #main=snp.sets.names[[counter]],
@@ -360,7 +362,87 @@ plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
 dev.off()
 
 # Create the PCA of the importance of the environmental variables
-pdf(paste0("outputs/GDM/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
+png(paste0("outputs/GDM/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM.png"),
+     width = 1200,height=1200,res=150)
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), 
+     xlim = xrng, 
+     ylim = yrng, 
+     pch = ".", 
+     cex = 4,
+     #main=snp.sets.names[[counter]],
+     col = rgb(scalR , scalG, scalB, max = 255), 
+     asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
+     pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
+     labels = vec)
+dev.off()
+}
+
+
+ProjectingGeneticCompositionGDMWithGEO <- function(env.rast,model,res,time,scenario){
+  
+# Create a raster of the genetic importance of each environmental and geographical variable
+rastTrans <- gdm.transform(model, env.rast)
+
+# Extract the values from the raster
+rastDat <- na.omit(getValues(rastTrans))
+
+# We want to keep all variables (environmental variables + geographical variables), so we do not run this row:
+# rastDat <- rastDat[,3:ncol(rastDat)]
+
+# Principal Components Analysis (PCA) to reduce the transformed environmental variables into three factors
+pca <- prcomp(rastDat, center=TRUE, scale.=FALSE)
+
+# assigns to colors, edit as needed to maximize color contrast, etc.
+a1 <- pca$x[,1]; a2 <- pca$x[,2]; a3 <- pca$x[,3]
+r <- a1+a2; g <- -a2; b <- a3+a2-a1 
+
+# scales colors
+scalR <- (r-min(r))/(max(r)-min(r))*255
+scalG <- (g-min(g))/(max(g)-min(g))*255
+scalB <- (b-min(b))/(max(b)-min(b))*255
+
+# assigns color to raster
+rast1 <- rast2 <- rast3 <- env.rast[[1]]
+
+rasValue <- raster::extract(env.rast, PinpinDistri,cellnumbers=T)
+rasValue <- as.data.frame(rasValue)
+rasValue <- na.omit(rasValue)
+
+
+mapCells <- rasValue$cell
+rast1[mapCells] <- scalR
+rast2[mapCells] <- scalG
+rast3[mapCells] <- scalB
+
+# stacks color rasters
+outRast <- stack(rast1, rast2, rast3)
+
+# Map of the projected current genetic composition
+pdf(paste0("outputs/GDM/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM_WithGEO.pdf"), 
+    width=48.5, height=50)
+par(mar=c(2.5,0.45,1.5,0.45)+0.1)
+plot(background,
+     col=grayscale_colors,
+     #main=snp.sets.names[[counter]],
+     axes=FALSE,legend=F)
+plotRGB(outRast, r = 1, g = 2, b = 3,add=T,bgalpha=0)
+dev.off()
+
+# Create the PCA of the importance of the environmental variables
+png(paste0("outputs/GDM/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM_WithGEO.png"),
+     width = 1200,height=1200,res=150)
 nvs <- dim(pca$rotation)[1]
 vec <-  row.names(pca$rotation)
 lv <- length(vec)
@@ -590,6 +672,17 @@ ProjectingGeneticCompositionGDM(env.rast=stackCurrClimRes30sec,
                                 time="Current",
                                 scenario="")
 
+## Projection under current climate with geographical variables
+# -------------------------------------------------------------
+
+if(counter==1){ # only for Ref SNPs
+ProjectingGeneticCompositionGDMWithGEO(env.rast=stackCurrClimRes30sec,
+                                model=gdm.mod,
+                                res="30sec",
+                                time="Current",
+                                scenario="")}
+
+
 ## Projection under the future climate
 # -------------------------------------
 ProjectingGeneticCompositionGDM(env.rast=stackFutClimSSP370,
@@ -752,7 +845,9 @@ rast3[mapCells] <- scalB
 outRast <- stack(rast1, rast2, rast3)
 
 # Create the map of projected genetic composition across the landscape
-pdf(paste0("outputs/GF/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
+pdf(paste0("outputs/GF/Projections/",time,"ProjMAP_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"), 
+    width=48.5, height=50)
+par(mar=c(2.5,0.45,1.5,0.45)+0.1)
 plot(background,
      col=grayscale_colors,
      #main=snp.sets.names[[counter]], 
@@ -769,7 +864,8 @@ scal <- 12
 xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
 yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
 
-pdf(paste0("outputs/GF/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
+png(paste0("outputs/GF/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GF.png"),
+     width = 1200,height=1200,res=150)
 plot((pca$x[, 1:2]), 
      xlim = xrng, 
      ylim = yrng, 
@@ -870,7 +966,9 @@ rast.go[rasValue$cell] <- GO
 
 
 # Figures with the same scale:
-pdf(paste0("outputs/GF/GenomicOffset/MapGenomicOffset_FixedScale_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
+pdf(paste0("outputs/GF/GenomicOffset/MapGenomicOffset_FixedScale_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"), 
+    width=48.5, height=50)
+par(mar=c(2.5,0.45,1.5,0.45)+0.1)
 plot(background,col=grayscale_colors, 
      axes=FALSE,
      #main=paste0("Genomic offset - ",scenario),
@@ -886,7 +984,9 @@ dev.off()
 
 
 # Figures with different scales:
-pdf(paste0("outputs/GF/GenomicOffset/MapGenomicOffset_VaryingScale_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"))
+pdf(paste0("outputs/GF/GenomicOffset/MapGenomicOffset_VaryingScale_",scenario,"_",snp.sets.codes[[counter]],"_GF.pdf"), 
+    width=48.5, height=50)
+par(mar=c(2.5,0.45,1.5,0.45)+0.1)
 plot(background,col=grayscale_colors, 
      axes=FALSE,
      legend=F)
