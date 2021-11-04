@@ -387,6 +387,29 @@ text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]),
      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
      labels = vec)
 dev.off()
+
+# Same but without the variable names (for a figure in the PhD manuscript)
+png(paste0("outputs/GDM/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM_WithoutLabels.png"),
+     width = 1200,height=1200,res=150)
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), 
+     xlim = xrng, 
+     ylim = yrng, 
+     pch = ".", 
+     cex = 4,
+     #main=snp.sets.names[[counter]],
+     col = rgb(scalR , scalG, scalB, max = 255), 
+     asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
+dev.off()
 }
 
 
@@ -465,6 +488,29 @@ jit <- 0.0015
 text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]), 
      pca$rotation[vec, 2]/scal + jit * sign(pca$rotation[vec, 2]), 
      labels = vec)
+dev.off()
+
+# Same but without the variable names (for a figure in the PhD manuscript)
+png(paste0("outputs/GDM/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GDM_WithGEO_WithoutLabels.png"),
+     width = 1200,height=1200,res=150)
+nvs <- dim(pca$rotation)[1]
+vec <-  row.names(pca$rotation)
+lv <- length(vec)
+vind <- rownames(pca$rotation) %in% vec
+scal <- 5
+xrng <- range(pca$x[, 1], pca$rotation[, 1]/scal) *1.1
+yrng <- range(pca$x[, 2], pca$rotation[, 2]/scal) * 1.1
+pca$rotation
+plot((pca$x[, 1:2]), 
+     xlim = xrng, 
+     ylim = yrng, 
+     pch = ".", 
+     cex = 4,
+     #main=snp.sets.names[[counter]],
+     col = rgb(scalR , scalG, scalB, max = 255), 
+     asp = 1)
+points(pca$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
 dev.off()
 }
 ```
@@ -883,6 +929,19 @@ text(pca$rotation[vec, 1]/scal + jit * sign(pca$rotation[vec, 1]),
 PredsProvs <- predict(model)
 PCprovs <- predict(pca, PredsProvs)
 points(PCprovs[, 1:2],pch = ".",cex=6)
+dev.off()
+
+# Same figure but without labels
+png(paste0("outputs/GF/Projections/",time,"ProjPCA_Res",res,"_",scenario,"_",snp.sets.codes[[counter]],"_GF_WithoutLabels.png"),
+     width = 1200,height=1200,res=150)
+plot((pca$x[, 1:2]), 
+     xlim = xrng, 
+     ylim = yrng, 
+     pch = ".", 
+     cex = 4, 
+     col = rgb(scalR , scalG, scalB, max = 255), 
+     asp = 1)
+arrows(rep(0, lv), rep(0, lv), pca$rotation[vec,1]/scal, pca$rotation[vec, 2]/scal, length = 0.0625)
 dev.off()
 
 # Show the alleles
