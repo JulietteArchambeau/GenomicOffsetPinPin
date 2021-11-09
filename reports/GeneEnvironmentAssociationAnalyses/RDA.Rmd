@@ -533,6 +533,11 @@ DF %>%
   kable() %>%  
   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
   column_spec(1, bold = T)
+
+# Generate the table in latex:
+print(xtable(DF, type = "latex",digits=2), 
+      file = "outputs/CandidateSNPs/rda/NumberCandidatesForEachVariable.tex", 
+      include.rownames=FALSE)
 ```
 
 
@@ -647,7 +652,7 @@ sum.tab.RDA %>%
 
 # Generate the table in latex:
 print(xtable(sum.tab.RDA, type = "latex",digits=2), 
-      file = "outputs/PartitioningVarianceRDA.tex", 
+      file = "outputs/CandidateSNPs/rda/PartitioningVarianceRDA.tex", 
       include.rownames=FALSE)
 ```
 
