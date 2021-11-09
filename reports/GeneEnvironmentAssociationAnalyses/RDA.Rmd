@@ -56,6 +56,7 @@ library(psych)      # CRAN v1.8.12   to run RDA and to plot the pairs panels
 library(tidyverse)  # CRAN v1.3.0
 library(adespatial) # CRAN v0.3-8    to calculate the Moran eigen vectors
 library(kableExtra) # CRAN v1.1.0
+library(xtable)
 ```
 
 This script is based on @forester2018comparing and the associated [vignette](https://popgen.nescent.org/2018-03-27_RDA_GEA.html).
@@ -533,5 +534,125 @@ DF %>%
   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
   column_spec(1, bold = T)
 ```
+
+
+# Partioning the variance
+
+This part of the report is based on @capblancq2021redundancy.
+
+We want to estimate the proportion of variance explained by the population structure (based on the ancestry coefficients), the environment (the set of selected variable used in the paper, i.e. chapter 3 of my PhD) and the geographical distance (population coordinates, i.e. longitude and latitude).
+
+We are going to run:
+  - one full RDA with all factors (population structure, environment and geographical distance), i.e. no variable conditioning.
+  - three partial RDA in which the factor of interest is conditioned by the other two factors.
+
+```{r LoadEnvGeoPopStructureDataVarPart}
+# Names  of the environmental variables of interest in the dataset:
+select.var <- c("bio5WC_prov",
+                "bio6WC_prov",
+                "bio12WC_prov",
+                "bio15WC_prov",
+                "water_top_prov",
+                "depth_roots_prov",
+                "TRI",
+                "BurnedArea")
+
+env <- readRDS(file="data/PhenoEnvPopStructureDataset.RDS") %>% 
+  dplyr::select(prov,clon,latitude_prov,longitude_prov,all_of(select.var),contains("Q")) %>% 
+  dplyr::rename(latitude="latitude_prov",
+                longitude="longitude_prov",
+                bio5="bio5WC_prov",
+                bio6="bio6WC_prov",
+                bio12="bio12WC_prov",
+                bio15="bio15WC_prov",
+                water_top="water_top_prov",
+                depth_roots="depth_roots_prov") %>% 
+  filter(clon %in% rownames(gen.imp)) %>% # keep the same clones as in the genomic data
+  unique() %>% 
+  arrange(clon) # the clones have to be in the same order as in the genomic data.. 
+
+# Names of the variables we are going to use in the document
+select.var <- c("bio5",
+                "bio6",
+                "bio12",
+                "bio15",
+                "water_top",
+                "depth_roots",
+                "TRI",
+                "BurnedArea")
+```
+
+
+<!-- We have to check that the order of the clones in both datasets (`env` and `gen.imp`) are the same: -->
+
+<!-- ```{r CheckingOrderClonesVarPart} -->
+<!-- identical(env$clon,rownames(gen.imp)) -->
+<!-- ``` -->
+
+```{r RunningFourRDAsVarPart,cache=T}
+# Full RDA
+full.rda <- rda(gen.imp ~ bio5 + bio6 + bio12 + bio15 + water_top + depth_roots + TRI + BurnedArea + Q1 + Q2 + Q3 + Q4 + Q4 + Q5 + latitude + longitude, 
+                data=env[,c("latitude","longitude",select.var,paste0(rep("Q",5),1:5))], 
+                scale=T,center=T)
+RsquareAdj(full.rda)
+anova.full.rda <- anova(full.rda)
+
+# Partial RDA: pure environment model
+env.rda <- rda(gen.imp ~ bio5 + bio6 + bio12 + bio15 + water_top + depth_roots + TRI + BurnedArea + Condition(Q1 + Q2 + Q3 + Q4 + Q4 + Q5 + latitude + longitude), 
+                data=env[,c("latitude","longitude",select.var,paste0(rep("Q",5),1:5))], 
+                scale=T,center=T)
+RsquareAdj(env.rda)
+anova.env.rda <- anova(env.rda)
+
+# Partial RDA: pure neutral population structure model
+pop.struct.rda <- rda(gen.imp ~ Q1 + Q2 + Q3 + Q4 + Q4 + Q5 + Condition(bio5 + bio6 + bio12 + bio15 + water_top + depth_roots + TRI + BurnedArea + latitude + longitude), 
+                data=env[,c("latitude","longitude",select.var,paste0(rep("Q",5),1:5))], 
+                scale=T,center=T)
+RsquareAdj(pop.struct.rda)
+anova.pop.struct.rda <- anova(pop.struct.rda)
+
+# Partial RDA: pure geography model
+geog.rda <- rda(gen.imp ~ latitude + longitude + Condition(bio5 + bio6 + bio12 + bio15 + water_top + depth_roots + TRI + BurnedArea + Q1 + Q2 + Q3 + Q4 + Q4 + Q5 ), 
+                data=env[,c("latitude","longitude",select.var,paste0(rep("Q",5),1:5))], 
+                scale=T,center=T)
+RsquareAdj(geog.rda)
+anova.geog.rda <- anova(geog.rda)
+```
+
+
+We are going to create a table similar to Table 2 in @capblancq2021redundancy.
+
+```{r SumTabVarPart}
+sum.tab.RDA <- tibble("RDA models"=c("Full model: Y ~ env. + geog. + pop. struct.",
+                      "Pure env. model: Y ~ env. | (geog. + pop. struct.)",
+                      "Pure pop. struct. model: Y ~ pop. struct. | (geog. + env.)",
+                      "Pure geog. model: Y ~ geog. | (pop. struct. + env.)"),
+       "Total exp. variance"=c(RsquareAdj(full.rda)[[1]],
+              RsquareAdj(env.rda)[[1]],
+              RsquareAdj(pop.struct.rda)[[1]],
+              RsquareAdj(geog.rda)[[1]]),
+       "Relative exp. variance"=c(1,
+                                  RsquareAdj(env.rda)[[1]]/RsquareAdj(full.rda)[[1]],
+                                  RsquareAdj(pop.struct.rda)[[1]]/RsquareAdj(full.rda)[[1]],
+                                  RsquareAdj(geog.rda)[[1]]/RsquareAdj(full.rda)[[1]]),
+       "P-value"=c(anova.full.rda[["Pr(>F)"]][[1]],
+                   anova.env.rda[["Pr(>F)"]][[1]],
+                   anova.pop.struct.rda[["Pr(>F)"]][[1]],
+                   anova.geog.rda[["Pr(>F)"]][[1]]))
+
+sum.tab.RDA %>% 
+  kable(digits = 4) %>%  
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+# Generate the table in latex:
+print(xtable(sum.tab.RDA, type = "latex",digits=2), 
+      file = "outputs/PartitioningVarianceRDA.tex", 
+      include.rownames=FALSE)
+```
+
+Importantly, `r 1-(RsquareAdj(env.rda)[[1]]/RsquareAdj(full.rda)[[1]] + RsquareAdj(pop.struct.rda)[[1]]/RsquareAdj(full.rda)[[1]] + RsquareAdj(geog.rda)[[1]]/RsquareAdj(full.rda)[[1]])` of the explained variation (`r RsquareAdj(full.rda)[[1]]-(RsquareAdj(env.rda)[[1]] + RsquareAdj(pop.struct.rda)[[1]] + RsquareAdj(geog.rda)[[1]])`) could not be uniquely attributed to any of the three sets of predictors.
+
+
 
 # References
