@@ -55,6 +55,8 @@ library(tidyverse)  # CRAN v1.3.0
 library(readxl)     # CRAN v1.3.1
 library(magrittr)   # CRAN v2.0.1
 library(kableExtra) # CRAN v1.1.0
+library(genetics)   # to calculate LD
+library(xtable)
 ```
 
 # Load & format all genomic data
@@ -121,13 +123,88 @@ sapply(codes, function(x) sum(is.na(x)))
 
 I create a dataset with all markers (rows) and clones (columns). 
 
-```{r CreatingTotalGenomicDataset,eval=F}
+```{r CreatingTotalGenomicDataset1,eval=F}
 sub <- data %>% 
   dplyr::select(-1,-2) %>%  # removing the first two columns corresponding to clone ID and assay(s) in which they were genotyped
   dplyr::slice(-c(1,2,3))   # removing the first three rows corresponding to the different SNP IDs
 
 colnames(sub) <- codes$snp_ID # attributing the SNP ID I created to the SNPs
+```
 
+I'm going to calculate LD. For that, I download the SNPs I will use latter as reference SNPs (after filtering)
+
+```{r EstimateLD,eval=F}
+which.BayPass.selection <- "IS"
+snp.sets <- readRDS(file=paste0("outputs/ListSetsSNPs",which.BayPass.selection,".rds"))
+
+# Reference SNPs
+sub.LD <- sub %>% 
+  dplyr::select(all_of(snp.sets$Ref))
+
+sub.LD[1:10,1:15]  %>% 
+  kable() %>%  
+  kable_styling(font_size=11,
+                bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
+
+sub.LD <- makeGenotypes(sub.LD)
+LD <- LD(sub.LD)
+
+saveRDS(LD, file="outputs/LD/outputsLDGenetics_Ref.rds")
+
+
+
+# Common candidates
+sub.LD <- sub %>% 
+  dplyr::select(all_of(snp.sets$Com))
+
+sub.LD <- makeGenotypes(sub.LD)
+LD <- LD(sub.LD)
+
+saveRDS(LD, file="outputs/LD/outputsLDGenetics_Com.rds")
+
+
+# Merged candidates
+sub.LD <- sub %>% 
+  dplyr::select(all_of(snp.sets$Mer))
+
+sub.LD <- makeGenotypes(sub.LD)
+LD <- LD(sub.LD)
+
+saveRDS(LD, file="outputs/LD/outputsLDGenetics_Mer.rds")
+
+
+# Candidates under expected strong selection
+sub.LD <- sub %>% 
+  dplyr::select(all_of(snp.sets$Mid))
+
+sub.LD <- makeGenotypes(sub.LD)
+LD <- LD(sub.LD)
+
+saveRDS(LD, file="outputs/LD/outputsLDGenetics_Mid.rds")
+```
+
+```{r LD,eval=F}
+snp.sets <- c("Ref","Mer","Mid","Com")
+tab <- tibble("SNP sets"=snp.sets, minimum=NA, maximum=NA,mean=NA,median=NA)
+
+# Load LD outputs
+for(i in snp.sets){
+  LD <- readRDS(file=paste0("outputs/LD/outputsLDGenetics_",i,".rds"))
+  tab[tab$`SNP sets`==i,"minimum"] <- range(LD$`R^2`,na.rm=T)[[1]]
+  tab[tab$`SNP sets`==i,"maximum"] <- range(LD$`R^2`,na.rm=T)[[2]]
+  tab[tab$`SNP sets`==i,"mean"] <- mean(LD$`R^2`,na.rm=T)
+  tab[tab$`SNP sets`==i,"median"] <- median(LD$`R^2`,na.rm=T)
+}
+
+
+# Generate the latex table
+print(xtable(tab, type = "latex",digits=2), 
+      file = "outputs/LD/LDtab.tex", 
+      include.rownames=FALSE)
+```
+
+
+```{r CreatingTotalGenomicDataset2,eval=F}
 # Converting letters (e.g. A/A, A/G) to numbers (0,1 or 2)
 list.alleles <- lapply(colnames(sub), function(x){
   
