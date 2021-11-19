@@ -114,16 +114,22 @@ lapply(vars, function(x){
 minv <- min(c(min(values(stackCurrClim[[x]]),na.rm=T),min(values(stackFutClimSSP370[[x]]),na.rm=T)))
 maxv <- max(c(max(values(stackCurrClim[[x]]),na.rm=T),max(values(stackFutClimSSP370[[x]]),na.rm=T)))
 
+if(x %in% c("bio5","bio6")){
+  col=colorRampPalette(c("green","blue","yellow","red","black"))
+} else {
+  col=colorRampPalette(c("black","red","yellow","blue","green"))
+}
+
 pdf(paste0("outputs/DiffEnvCurrentFutureClimate/SSP370/",x,".pdf"),height=12,width=12)
 layout(matrix(1:4,2,2))
 
 # current
 plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current")
-plot(stackCurrClim[[x]],zlim=c(minv,maxv) ,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+plot(stackCurrClim[[x]],zlim=c(minv,maxv) ,add=T,col=col(255))
 
 # future
 plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future")
-plot(stackFutClimSSP370[[x]],add=T,zlim=c(minv,maxv) ,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+plot(stackFutClimSSP370[[x]],add=T,zlim=c(minv,maxv) ,col=col(255))
 
 # absolute difference
 diff <- overlay(stackFutClimSSP370[[x]],
@@ -131,7 +137,7 @@ diff <- overlay(stackFutClimSSP370[[x]],
                 fun=function(r1, r2){return(r1-r2)})
 
 plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future - Current")
-plot(diff,add=T,col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+plot(diff,add=T,col=col(255))
 
 # percentage of change. 
 diff <- overlay(stackFutClimSSP370[[x]],
@@ -142,8 +148,29 @@ plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
      main="Percentage change btw future and current")
 plot(diff,
      add=T,
-     col=colorRampPalette(c("black","red","yellow","blue","green"))(255))
+     col=col(255))
 dev.off()
+
+
+# Map only current climatic conditions
+pdf(paste0("outputs/DiffEnvCurrentFutureClimate/SSP370/",x,"_Current.pdf"), 
+    width=18, height=18.5)
+plot(background,
+     col=grayscale_colors,
+     axes=FALSE,legend=F)
+plot(stackCurrClim[[x]],zlim=c(minv,maxv) ,add=T,col=col(255))
+dev.off()
+
+# Map only future climatic conditions
+pdf(paste0("outputs/DiffEnvCurrentFutureClimate/SSP370/",x,"_Future.pdf"), 
+    width=18, height=18.5)
+plot(background,
+     col=grayscale_colors,
+     axes=FALSE,legend=F)
+plot(stackFutClimSSP370[[x]],zlim=c(minv,maxv) ,add=T,col=col(255))
+dev.off()
+
+
 })
 ```
 
