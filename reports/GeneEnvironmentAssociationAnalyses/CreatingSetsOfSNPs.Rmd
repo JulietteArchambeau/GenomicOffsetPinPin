@@ -73,23 +73,48 @@ geno <- readRDS(file="data/GenomicData/FormattedData/GenomicData_454clones_9817s
 ```
 
 
-Load the Baypass candidates.
+> Load the Baypass candidates.
 
 ```{r LoadCandBayPass}
-modelBayPass <- "MCMC" # "IS" or "MCMC"
+modelBayPass <- "IS" # "IS" or "MCMC"
 candBaypass <- readRDS(file=paste0("outputs/CandidateSNPs/baypass/CandSNPsBayPass",modelBayPass,".rds"))
 candBaypass  %>% 
   kable() %>% 
   kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
 ```
 
-Load the RDA candidates.
+Column meaning:
+
+  - `medianBF`: median estimate of the Bayes factor from BayPass.
+  
+  - `medianBeta`: median estimate of the $\beta$ estimate from BayPass.
+  
+  - `COVARIABLE`: covariate with which the SNP was found to be associated with.
+
+> Load the RDA candidates.
 
 ```{r LoadCandRDA}
 candRDA <- readRDS(file="outputs/CandidateSNPs/rda/352CandSNPsRDA.rds")
+candRDA[1:10,]  %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
 ```
 
+Column meaning:
+
+  - `axis`: Significant axis. (comment: a snp can have several significant axes but, as we removed the duplicate SNPs, only one is noted here)
+  
+  - `loading`: SNP loading on the significant axis.
+  
+  - `bio5` ...  `BurnedArea`: correlation with each environmental covariate.
+  
+  - `predictor`: main predictor for each SNP.
+  
+  -  `correlation`: correlation with the main predictor.
+
 # Merged candidates
+
+
 
 ```{r MergedCand}
 mergedcand <- candBaypass %>% 
@@ -127,7 +152,7 @@ highcand <- candBaypass %>%
   dplyr::rename(varBaypass=COVARIABLE,
          BF.Baypass=medianBF,
          beta.Baypass=medianBeta,
-         loading.rda=loading,
+         loading.RDA=loading,
          beta.bio5.RDA=bio5,
          beta.bio6.RDA=bio6,
          beta.bio12.RDA=bio12,
@@ -156,7 +181,7 @@ comcand <- candBaypass %>%
   dplyr::rename(varBaypass=COVARIABLE,
          BF.Baypass=medianBF,
          beta.Baypass=medianBeta,
-         loading.rda=loading,
+         loading.RDA=loading,
          beta.bio5.RDA=bio5,
          beta.bio6.RDA=bio6,
          beta.bio12.RDA=bio12,
@@ -174,7 +199,9 @@ comcand %>%
 
 There are **`r length(comcand$snp)` candidates under expected strong selection**.
 
-# List of sets of SNPs
+# Exporting candidate SNPs
+
+## List of sets of candidate SNPs
 
 ```{r CreatingListSnpSets}
 snp.sets <- list(rownames(geno), # Reference SNPs
@@ -183,7 +210,49 @@ snp.sets <- list(rownames(geno), # Reference SNPs
                  comcand$snp)    # Common candidates
 
 names(snp.sets) <- c("Ref","Mer","Mid","Com")
-saveRDS(snp.sets,file=paste0("outputs/ListSetsSNPs",modelBayPass,".rds"))
+#saveRDS(snp.sets,file=paste0("outputs/ListSetsSNPs",modelBayPass,".rds"))
 ```
+
+## DF with candidate SNP codes
+
+Below we create a dataframe with all the candidate SNPs and their associated SNP codes (original ID, ID in the  Axiom assay and ID in the Illumina Infinium assay).
+
+<!-- DF sent to Katha the 2sn of June 2022. -->
+
+```{r DFCandSNPwithSNPcodes}
+snp.codes <- readRDS("data/GenomicData/FormattedData/SNPcodes.rds") %>% 
+  dplyr::rename(snp_ID_Juliette=snp_ID)
+
+list.snps.cand <- list(mergedcand, highcand, comcand)
+names(list.snps.cand) <- c("Mer","Mid","Com")
+df.snps <- list.snps.cand %>% 
+  bind_rows(.id="SnpSet") %>% 
+  dplyr::select(-loading.RDA) %>% 
+  dplyr::rename(snp_ID_Juliette=snp) %>% 
+  left_join(snp.codes,by="snp_ID_Juliette")
+  
+saveRDS(df.snps,file=paste0("outputs/ListSetsCandSNPs_WithSNPCodes_",modelBayPass,".rds"))
+write.csv(df.snps, file= paste0("outputs/ListSetsCandSNPs_WithSNPCodes_",modelBayPass,".csv"), row.names = F)
+```
+
+Column meaning:
+
+  - `SnpSet`: set of candidate SNPs in which the SNP is included (Mer for merged candidates, Mid for the candidates under expected strong selection and Com for the common candidates)
+  
+  - `snp_ID_Juliette`: My own snp code I used in my analyses.
+
+  - `varBaypass`: the covariate with which the SNP was found to be associated with.
+
+  - `BF.Baypass`: median estimate of the Bayes factor in the BayPass analysis.
+  
+  - `beta.Baypass`: median estimate of the beta coefficient (standing for the linear association between the SNP frequency and the environmental covariate) in the BayPass analysis.
+
+  - `beta.(covariate).RDA`: coefficient of correlation between the SNP and each environmental covariate in the RDA.
+  
+  - `original_ID`: original SNP ID.
+
+  - `affx_ID`:  ID from the Axiom assay.
+
+  - `infinium_ID`: ID from the Illumina Infinium assay.
 
 `r knitr::opts_chunk$set(eval = F)`
