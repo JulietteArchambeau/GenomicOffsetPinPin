@@ -61,18 +61,32 @@ library(xtable)
 
 # Load & format all genomic data
 
+Downloading the raw genomic data provided by Santiago Gonzalez-Martinez.
+
 ```{r LoadGenomicData, warning=F,message=F}
 data <- read_excel("data/GenomicData/data_curated_Affx+Inf.xlsx", sheet = 5, col_names = FALSE)
 ```
 
+```{r VizRawGenomicData, echo=F}
+# Visualizing the dataset:
+data[1:10,1:8]  %>% 
+  kable() %>%  
+  kable_styling(font_size=11,
+                bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
+```
+
+The first row is the original SNP ID, the second row is the SNP ID from the Axiom assay and the third row is the SNP ID from the Illumina Infinium assay. The first column is the clone ID and the second column indicates in which assay the SNP has been genotyped (the Axiom assay, the Illumina Infinium assay or both). 
+
 ```{r DupplicatedPIA3, warning=F,message=F,echo=F,eval=F}
+# The clone PIA3 was duplicated in the initial genomic dataset. 
+# It was modified in the most recent genomic dataset, so this chunk is not useful anymore. 
+
 
 # First genomic file sent by Santi
 # --------------------------------
 
 data <- read_excel("data/GenomicData/data_curated_Affx+Inf_PIA3double.xlsx", sheet = 3, col_names = FALSE)
 
-# The clone PIA3 is duplicated.
 
 PIA3 <- data %>%
   filter(...1=="PIA3") %>%
@@ -89,10 +103,7 @@ PIA3 <- data %>%
 
 data <- data %>%  mutate(...1= replace(...1, ...1=="PIA3" & ...2=="only_Inf",  "PIA3a" ),
                  ...1= replace(...1, ...1=="PIA3" & ...2=="only_Affx", "PIA3b" ))
-
-# It is now modified in the new genomic dataset, so this chunk is not useful anymore. 
 ```
-
 
 ## Dataset with SNP IDs
 
@@ -100,13 +111,12 @@ I create a dataset with the different codes used to refer to the SNP markers:
 
   - `original_ID` refers to the original SNP ID.
   
-  - `affx_ID` refers to the ID from the Axiom assay (most recent genomic data). 
+  - `affx_ID` refers to the SNP ID from the Axiom assay (most recent genomic data). 
   
-  - `infinium_ID` refers to the ID from the Illumina Infinium assay (older genomic data).
+  - `infinium_ID` refers to the SNP ID from the Illumina Infinium assay (older genomic data).
 
-  - `snp_ID` is my own ID that I'm going to create for this paper.
+  - `snp_ID` is the SNP ID created for the following analyses (for the paper and the third chapter of the PhD manuscript)
   
-
 
 ```{r CodeDataset}
 codes <- data[1:3,] %>% t() %>% as.data.frame() %>% as_tibble()
@@ -119,6 +129,33 @@ codes <- codes[-c(1,2),] %>%
 sapply(codes, function(x) sum(is.na(x)))
 ```
 
+
+```{r RawGenomicDataDRYAD, echo=F}
+# We save the genomic data for the DRYAD repository
+# =================================================
+
+# SNP codes
+write_csv(codes,"data_DRYAD/SnpCodesMatching.csv",append=FALSE)
+
+# Genomic data in the DRYAD repo
+dataDRYAD <- data %>% 
+  dplyr::slice(-c(1,2,3)) %>%   # removing the first three rows corresponding to the different SNP IDs
+  set_colnames(c("clone","assay",codes$snp_ID))
+
+# Visualizing the dataset:
+dataDRYAD[40:50,1:13]  %>% 
+  kable() %>%  
+  kable_styling(font_size=11,
+                bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
+
+# NAs are noted with '---'
+sapply(dataDRYAD[40:50,1:13], function(x) sum(x=="---"))
+
+write_csv(dataDRYAD,"data_DRYAD/RawGenomicData.csv",append=FALSE)
+```
+
+
+
 ## Genomic data with all data
 
 I create a dataset with all markers (rows) and clones (columns). 
@@ -129,6 +166,11 @@ sub <- data %>%
   dplyr::slice(-c(1,2,3))   # removing the first three rows corresponding to the different SNP IDs
 
 colnames(sub) <- codes$snp_ID # attributing the SNP ID I created to the SNPs
+
+sub[1:10,1:15]  %>% 
+  kable() %>%  
+  kable_styling(font_size=11,
+                bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
 ```
 
 I'm going to calculate LD. For that, I download the SNPs I will use latter as reference SNPs (after filtering)
@@ -321,13 +363,13 @@ table(countdup$count)
 This is relevant with what we found before as:
 
 ```{r}
-2*91 + 3*12 + 4 + 5
+2*92 + 3*14 + 4 + 5
 ```
 
 So it means that there are:
 
-  - <span style="color: red;"> 91 pairs of duplicate SNPs.</span>
-  - <span style="color: red;"> 12 groups of 3 duplicate SNPs.</span>
+  - <span style="color: red;"> 92 pairs of duplicate SNPs.</span>
+  - <span style="color: red;"> 14 groups of 3 duplicate SNPs.</span>
   - <span style="color: red;"> 1 group of 4 duplicate SNPs.</span>
   - <span style="color: red;"> 1 group of 5 duplicate SNPs.</span>
 
@@ -344,7 +386,7 @@ To add these situations in the count of duplicated SNPs, I selected all the pair
 # Invert the genomic matrix
 tdf <- df %>% t() %>% as.data.frame() 
 
-# Create a matrix of correlation for all SNPs (5165snps x 5165snps)
+# Create a matrix of correlation for all SNPs (12483snps x 12483snps)
 matcor <- cor(tdf, use = "pairwise.complete.obs")
 matcor[1:10,1:10] %>% 
   kable() %>%  
@@ -357,17 +399,17 @@ matcor[1:10,1:10] %>%
   kable_styling(bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
 
 saveRDS(matcor,file="data/GenomicData/FormattedData/CorrelationMatrixAmongMarkers.rds")
-
-# Counting the number of pairs of SNPs that have a correlation coefficient of 1
-length(which(matcor==1))
 ```
 
 
-<span style="color: red;">2160 pairs of SNPs have a correlation coefficient of 1.</span>
+```{r LoadCorMatrixAmongMarkers,echo=F}
+matcor <- readRDS(file="data/GenomicData/FormattedData/CorrelationMatrixAmongMarkers.rds")
+```
+
+<span style="color: red;">`r length(which(matcor==1))` pairs of SNPs have a correlation coefficient of 1.</span>
+
 
 ```{r NamesCorrelatedSNPs,eval=F}
-matcor <- readRDS(file="data/GenomicData/FormattedData/CorrelationMatrixAmongMarkers.rds")
-
 # If I want to have the names of the SNPs that have a correlation coefficient of 1
 snp.list <- reshape2::melt(matcor) %>% 
   filter(value == 1) %>% 
@@ -399,7 +441,7 @@ write_csv(snp.list,"data/GenomicData/FormattedData/CorrelatedSnps.csv",append=F)
 
 # Removing the ROD population
 
-We remove the clones from the ROD (Rodoiros) populations, as they come from a plantation of material from Central Spain in the Iberian Atlantic region.
+We remove the clones from the ROD (Rodoiros) population, as they come from a plantation of material from Central Spain in the Iberian Atlantic region.
 
 ```{r RmROD}
 df <- df %>% 
@@ -535,7 +577,7 @@ write_csv(df.csv,
 
 ## How many SNPs genotyped in each assay?
 
-We want to know how many SNPs were genotyped in the Infiunium assay, in the Affymetric assay and in both. 
+We want to know how many SNPs were genotyped in the Infinium assay, in the Affymetric assay and in both. 
 
 ```{r NumberSNPgenotypedAssays}
 nb <- sapply(df.csv[,1:4], function(x) sum(!(is.na(x))))
@@ -547,7 +589,7 @@ Among the `r nb[[1]]` SNPs used in this paper (after filtering), **`r nb[[3]]` w
 
 ## How many clones genotyped in each assay?
 
-We want to know the same for the clones, i.e. how many clones were genotypes by each assay and by both.
+We want to know the same for the clones, i.e. how many clones were genotyped by each assay and by both.
 
 ```{r NumberClonesGenotypedAssays}
 tab.clon <- data[4:nrow(data),1:2] %>% 
