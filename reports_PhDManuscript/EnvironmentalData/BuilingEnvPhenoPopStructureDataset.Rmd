@@ -156,7 +156,11 @@ Great, no missing data.
 
 
 ```{r SavingDataset}
-saveRDS(data,"data/PhenoEnvPopStructureDataset.RDS")
+# saveRDS(data,"data/PhenoEnvPopStructureDataset.RDS")
+
+# We save the dataset for the DRYAD repository
+data %>% dplyr::select(-metap, -region ,-clon_original, -clones522, -block_original, -bb, -dbb, -d13C, -SLA) %>% 
+  write_csv("data_DRYAD/PhenoEnvPopStructureDataset.csv", append=FALSE)
 ```
 
 
