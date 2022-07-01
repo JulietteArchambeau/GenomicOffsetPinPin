@@ -75,8 +75,8 @@ Topographic variable:`TRI`: topographic ruggedness index (unitless)
 
 Soil-related variables from the European Soil Database Derived data:
 
-  - `water_top` = sand content in the top layers of the soil (in %)
-  - `depth_roots` = Depth available to roots (in cm)
+  - `water_top` = the total available water content (mm)
+  - `depth_roots` = depth available to roots (cm)
 
 Climatic variables from WordClim (average for the years 1970-2000):
 
@@ -183,7 +183,7 @@ remove.NAs.stack<-function(rast.stack){
 Load the mask of the maritime pine distribution (made with Euforgen data and the NFI plots)
 
 ```{r LoadMask}
-PinpinDistri <- shapefile('data_DRYAD/PinpinDistriEUforgen_NFIplotsBuffer10km.shp')
+PinpinDistri <- shapefile('data_DRYAD/Mapping/PinpinDistriEUforgen_NFIplotsBuffer10km.shp')
 plot(PinpinDistri)
 ```
 
