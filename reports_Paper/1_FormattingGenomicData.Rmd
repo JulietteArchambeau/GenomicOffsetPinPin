@@ -526,8 +526,9 @@ gen.imp[1:10,1:10] %>%
 # Exporting the dataset
 
 ```{r ExportGenomicDataImputedRDS}
-write_csv(gen.imp,
-        paste0("data_DRYAD/ImputedGenomicData_",ncol(gen.imp),"clones_",nrow(gen.imp),"snps.csv"),
+gen.imp %>% 
+  rownames_to_column(var="snp_ID") %>% 
+  write_csv(paste0("data_DRYAD/ImputedGenomicData_",ncol(gen.imp),"clones_",nrow(gen.imp),"snps.csv"),
         append=FALSE)
 ```
 
