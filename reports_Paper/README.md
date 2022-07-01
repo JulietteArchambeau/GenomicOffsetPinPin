@@ -24,103 +24,59 @@ This file contains information related to the geographic location and the enviro
 
 Meaning of the columns:
 
-  - `prov`: ID of the population.
-  
-  - `longitude_prov`:  longitude of the geographic location of the population.
-  
-  - `latitude_prov`: latitude of the geographic location of the population.
+* `prov`: ID of the population.
+* `longitude_prov`:  longitude of the geographic location of the population.
+* `latitude_prov`: latitude of the geographic location of the population.
+* `site`: common garden in which the phenotype (height and survival) was measured.
+* `clon`: ID of the clone (i.e. genotype).
+* `block`: ID of the block in which the phenotype was measured.
+* `tree`: ID of the tree on which the phenotype was measured.
+* `obs`: ID of the observation (i.e. measurement).
+* `age`: Tree age (in months) when the phenotype was measured.
+* `survival`: binary variable indicating wheter the tree was alive (1) or dead (0).
+* `height`: height measurement in cm. 
+* `altitude_prov`: altitude of the geographic location of the population.
+* `latitude_site`: latitude of the geographic location of the common garden in which the phenotype was measured.
+* `longitude_site`: longitude of the geographic location of the common garden in which the phenotype was measured.
 
-  - `site`: common garden in which the phenotype (height and survival) was measured.
+* `bio1WC_prov` to `bio9WC_prov`: [Bioclimatic variables](https://www.worldclim.org/data/bioclim.html) from WordlClim (30 seconds resolution, $\sim$ 1 km2 resolution; average for the years 1970-2000) extracted at the geographic location of the population;
+    * `bio1WC_prov`: mean annual temperature (in C°).
+    * `bio10WC_prov`: mean temperature of the warmest quarter (in C°).
+    * `bio11WC_prov`: mean temperature of the coldest quarter (in C°).
+    * `bio12WC_prov`: annual precipitation (in mm).
+    * `bio13WC_prov`: precipitation of the wettest month (in mm).
+    * `bio14WC_prov`: precipitation of the driest month (in mm).
+    * `bio15WC_prov`:  precipitation seasonality (coefficient of variation).
+    * `bio16WC_prov`: precipitation of the wettest quarter (in mm).
+    * `bio17WC_prov`: precipitation of driest quarter (in mm).
+    * `bio18WC_prov`: precipitation of the warmest quarter (in mm).
+    * `bio19WC_prov`: precipitation of the coldest quarter (in mm).
+    * `bio2WC_prov`: mean diurnal range (mean of monthly (maximum temperature - minimum temperature)).
+    * `bio3WC_prov`: isothermality (bio2/bio7) (×100).
+    * `bio4WC_prov`: temperature seasonality (standard deviation ×100).
+    * `bio5WC_prov`:  maximum temperature of the warmest month (in C°).
+    * `bio6WC_prov`: minimum temperature of the coldest month (in C°).
+    * `bio7WC_prov`: temperature annual range (bio5-bio6)
+    * `bio8WC_prov`: mean temperature of the wettest quarter (in C°).
+    * `bio9WC_prov`: mean temperature of the driest quarter (in C°).
   
-  - `clon`: ID of the clone (i.e. genotype).
-  
-  - `block`: ID of the block in which the phenotype was measured.
-  
-  - `tree`: ID of the tree on which the phenotype was measured.
-  
-  - `obs`: ID of the observation (i.e. measurement).
-  
-  - `age`: Tree age (in months) when the phenotype was measured.
-  
-  - `survival`: binary variable indicating wheter the tree was alive (1) or dead (0).
-  
-  - `height`: height measurement in cm. 
-  
-  - `altitude_prov`: altitude of the geographic location of the population.
-  
-  - `latitude_site`: latitude of the geographic location of the common garden in which the phenotype was measured.
-  
-  - `longitude_site`: longitude of the geographic location of the common garden in which the phenotype was measured.
-  
-  - `bio1WC_prov` to `bio9WC_prov`: [Bioclimatic variables](https://www.worldclim.org/data/bioclim.html) from WordlClim (30 seconds resolution, $\sim$ 1 km2 resolution; average for the years 1970-2000) extracted at the geographic location of the population;
-  
-    - `bio1WC_prov`: mean annual temperature (in C°).
+* `clay_top_prov` to `depth_roots_prov`: soil-related variables from the [European Soil Database Derived data](https://esdac.jrc.ec.europa.eu/content/european-soil-database-derived-data) at 1-km resolution extracted at the geographic location of the population:
+    * `clay_top_prov`: clay content in the topsoil (0-30 cm) in %.
+    * `clay_top_prov`: silt content in the topsoil (0-30 cm) in %.
+    * `clay_top_prov`: sand content in the topsoil (0-30 cm) in %.
+    * `water_top_prov`: total available water content in mm.
+    * `depth_roots_prov`: depth available to roots (in cm).
     
-    - `bio10WC_prov`: mean temperature of the warmest quarter (in C°).
-    
-    - `bio11WC_prov`: mean temperature of the coldest quarter (in C°).
-    
-    - `bio12WC_prov`: annual precipitation (in mm).
-    
-    - `bio13WC_prov`: precipitation of the wettest month (in mm).
-    
-    - `bio14WC_prov`: precipitation of the driest month (in mm).
-    
-    - `bio15WC_prov`:  precipitation seasonality (coefficient of variation).
-    
-    - `bio16WC_prov`: precipitation of the wettest quarter (in mm).
-    
-    - `bio17WC_prov`: precipitation of driest quarter (in mm).
-    
-    - `bio18WC_prov`: precipitation of the warmest quarter (in mm).
-    
-    - `bio19WC_prov`: precipitation of the coldest quarter (in mm).
-    
-    - `bio2WC_prov`: mean diurnal range (mean of monthly (maximum temperature - minimum temperature)).
-    
-    - `bio3WC_prov`: isothermality (bio2/bio7) (×100).
-    
-    - `bio4WC_prov`: temperature seasonality (standard deviation ×100).
-    
-    - `bio5WC_prov`:  maximum temperature of the warmest month (in C°).
-    
-    - `bio6WC_prov`: minimum temperature of the coldest month (in C°).
-    
-    - `bio7WC_prov`: temperature annual range (bio5-bio6)
-    
-    - `bio8WC_prov`: mean temperature of the wettest quarter (in C°).
-    
-    - `bio9WC_prov`: mean temperature of the driest quarter (in C°).
-    
-  - `clay_top_prov` to `depth_roots_prov`: soil-related variables from the [European Soil Database Derived data](https://esdac.jrc.ec.europa.eu/content/european-soil-database-derived-data) at 1-km resolution extracted at the geographic location of the population:
-  
-    - `clay_top_prov`: clay content in the topsoil (0-30 cm) in %.
-    
-    - `clay_top_prov`: silt content in the topsoil (0-30 cm) in %.
-    
-    - `clay_top_prov`: sand content in the topsoil (0-30 cm) in %.
-    
-    - `water_top_prov`: total available water content in mm.
-    
-    - `depth_roots_prov`: depth available to roots (in cm).
-  
-  - `Q1`: proportion of assignment to the northern African (NA) gene pool for each clone.
-  
-  - `Q2`: proportion of assignment to the Corsican (C) gene pool for each clone.
-  
-  - `Q3`: proportion of assignment to the central Spain (CS) gene pool for each clone.
-  
-  - `Q4`: proportion of assignment to the French Atlantic (FA) gene pool for each clone.
-  
-  - `Q5`: proportion of assignment to the Iberian Atlantic (IA) gene pool for each clone.
-  
-  - `Q6`: proportion of assignment to the south-eastern Spain (SES) gene pool for each clone.
-  
-  - `max.Q`: main gene pool for each clone (i.e. the gene pool constituting the higher proportion of population ancestry)
-    
-  - `TRI`: topographic ruggedness index (unitless).
-  
-  - `BurnedArea`: average of the monthly burned area from June 1995 to December 2014 (hectares)
+* `Q1`: proportion of assignment to the northern African (NA) gene pool for each clone.
+* `Q2`: proportion of assignment to the Corsican (C) gene pool for each clone.
+* `Q3`: proportion of assignment to the central Spain (CS) gene pool for each clone.
+* `Q4`: proportion of assignment to the French Atlantic (FA) gene pool for each clone.
+* `Q5`: proportion of assignment to the Iberian Atlantic (IA) gene pool for each clone.
+* `Q6`: proportion of assignment to the south-eastern Spain (SES) gene pool for each clone.
+* `max.Q`: main gene pool for each clone (i.e. the gene pool constituting the higher proportion of population ancestry)
+
+* `TRI`: topographic ruggedness index (unitless).
+* `BurnedArea`: average of the monthly burned area from June 1995 to December 2014 (hectares)
   
   
 ### Raw genomic data
@@ -135,11 +91,9 @@ Missing data are indicated with `---`.
 
 Meaning of the columns:
 
-  - `clone`: clone ID.
-  
-  - `assay`: Assay in which the clone was genotyped, either the Infinium assay (`only_Inf`), the Axiom assay (`only_Affx`) or both assays (`both_Inf_Affx`).
-  
-  - `snp_1` --> `snp_14016`:  genotype for each of the 14,016 SNPs.
+* `clone`: clone ID.
+* `assay`: Assay in which the clone was genotyped, either the Infinium assay (`only_Inf`), the Axiom assay (`only_Affx`) or both assays (`both_Inf_Affx`).
+* `snp_1` --> `snp_14016`:  genotype for each of the 14,016 SNPs.
 
 ### SNP codes
 
@@ -149,13 +103,10 @@ This file contains the correspondence among the SNP codes of the different assay
 
 Meaning of the columns:
 
-  - `original_ID`: original SNP ID
-  
-  - `affx_ID`: SNP ID from the Axiom assay.
-  
-  - `infinium_ID`: SNP ID from the Illumina Infinium assay.
-  
-  - `snp_ID`: SNP ID used in the present study.
+* `original_ID`: original SNP ID
+* `affx_ID`: SNP ID from the Axiom assay.
+* `infinium_ID`: SNP ID from the Illumina Infinium assay.
+* `snp_ID`: SNP ID used in the present study.
   
   
   
@@ -198,15 +149,11 @@ For each environmental covariate, we performed five independant runs of the **st
 
 The **list of candidate SNPs** identified in the BayPass analysis is provided in the file `CandSNPsBayPassIS.csv`. Here is the meaning of the columns:
 
-  - `snp`: SNP ID used in the present study. 
-  
-  - `medianBF`: **median estimate of the Bayes Factor** in dB units across the five independant runs (measuring the support of the association of each SNP with each environmental covariate).
-  
-  - `medianBeta`: **median estimate of the regression coefficients** ($\beta_i$ in the standard covariate model) across the five independant runs (measuring the strength of the association of each SNP with each environmental covariate).
-  
-  - `medianEBP`: **median estimate of the empirical Bayesian P-values** in the $\log_{10}$ scale (measuring the support in favor of a non-null regression coefficient).
-  
-  -  `COVARIABLE`: **environmental covariate** associated with the candidate SNP.
+* `snp`: SNP ID used in the present study. 
+* `medianBF`: **median estimate of the Bayes Factor** in dB units across the five independant runs (measuring the support of the association of each SNP with each environmental covariate).
+* `medianBeta`: **median estimate of the regression coefficients** ($\beta_i$ in the standard covariate model) across the five independant runs (measuring the strength of the association of each SNP with each environmental covariate).
+* `medianEBP`: **median estimate of the empirical Bayesian P-values** in the $\log_{10}$ scale (measuring the support in favor of a non-null regression coefficient).
+* `COVARIABLE`: **environmental covariate** associated with the candidate SNP.
 
 ### Data for RDA analysis
 
@@ -216,13 +163,10 @@ Associated script: `4_GEAanalyses_RDA.Rmd`.
 
 The **list of candidate SNPs** identified in the RDA analysis is provided in the file `CandSNPsRDA.csv`. Here is the meaning of the columns:
 
-  - `snp`: SNP ID used in the present study. 
-  
-  - `bio5` to `BurnedArea`: correlation coefficients between each candidate SNP and each environmental covariate.
-  
-  - `predictor`: environmental covariate with the highest association with the candidate SNP.
-  
-  - `correlation`: correlation coefficient between the candidate SNP and the environmental covariate with the highest association with the candidate SNP (i.e. the `predictor` of the previsou column).
+* `snp`: SNP ID used in the present study. 
+* `bio5` to `BurnedArea`: correlation coefficients between each candidate SNP and each environmental covariate.
+* `predictor`: environmental covariate with the highest association with the candidate SNP.
+* `correlation`: correlation coefficient between the candidate SNP and the environmental covariate with the highest association with the candidate SNP (i.e. the `predictor` of the previsou column).
 
 
 ### LD of the three SNP sets
