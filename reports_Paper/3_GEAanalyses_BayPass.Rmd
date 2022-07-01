@@ -1,0 +1,1331 @@
+---
+title: 'Univariate genetic-environment association: <span style="font-variant:small-caps;">BayPass</span>'
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+bibliography: references.bib 
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)      # CRAN v1.26
+library(vegan)      # CRAN v2.5-6
+library(psych)      # CRAN v1.8.12
+library(tidyverse)  # CRAN v1.3.0
+library(corrplot)   # CRAN v0.84
+library(kableExtra) # CRAN v1.1.0
+```
+
+```{r BayPassUtils}
+source("~/Bureau/baypass_2.2/utils/baypass_utils.R")
+```
+
+In this document, we identify candidate SNPs using the **gene-environment association analysis** provided by the **<span style="font-variant:small-caps;">BayPass</span> software**. 
+
+In previous analyses based on a subset of the genomic data (i.e. only SNPs genotyped in the Infinium assay, that is 5,165 SNPs), we found that the results of the **standard covariate model** were more robust using the **Important Sampling (IS) approximation** (default) than with the MCMC algorithm. So we only use the IS approximation in this document. 
+
+
+# Download <span style="font-variant:small-caps;">BayPass</span>
+
+I downloaded [here](http://www1.montpellier.inra.fr/CBGP/software/baypass/download.html) the version 2.2 of <span style="font-variant:small-caps;">BayPass</span>.
+
+I extracted the `tar.gz` file in `~/Bureau` with:
+
+```{bash ExtractBayPasstargz, eval=F}
+cd ~/Bureau/
+tar -zxvf baypass_2.2.tar.gz
+```
+
+To compile <span style="font-variant:small-caps;">BayPass</span>, I used the gfortran free compiler (the command should automatically produce an executable called `g_baypass`).
+
+```{bash CompileBaypass, eval=F}
+cd baypass_2.2/sources/
+make clean all FC=gfortran
+```
+
+To execute <span style="font-variant:small-caps;">BayPass</span>, e.g. here the `help` command:
+
+```{bash}
+cd ~/Bureau/baypass_2.2/sources
+./g_baypass -help
+```
+
+
+# Load and format data
+ 
+## Genomic data
+
+We load the imputed genomic dataset: 
+
+```{r LoadGenomicData}
+geno <- read.csv("data_DRYAD/ImputedGenomicData_454clones_9817snps.csv",row.names = 1) %>% t() %>% as.data.frame()
+geno[1:10,1:10]  %>% 
+  kable() %>%  
+  kable_styling(font_size=12,
+                bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
+```
+
+In this dataset: `r dim(geno)[2]` SNPs and `r dim(geno)[1]` clones (i.e. genotypes). 
+
+The genomic data for <span style="font-variant:small-caps;">BayPass</span> needs to be allele counts for each SNP in each of the provenance. 
+
+```{r CalculateAlleleCounts, eval=F}
+count.2nd.allele = function(x) {2*length(x)-sum(x)}
+stats = c('sum', 'count.2nd.allele')
+
+df <- geno %>% mutate(prov=str_sub(row.names(geno),1,3)) %>% 
+  dplyr::select(prov,everything()) %>% 
+  group_by(prov) %>% 
+  dplyr::summarize_all(.funs=stats)  # very long
+
+write_csv(df,paste0("data_DRYAD/BayPassGEAAnalysis/AlleleCounts_",dim(geno)[2],"snps",dim(geno)[1],"clones.csv"))
+```
+
+```{r ArrangeAlleleCounts}
+df <- read.csv(file=paste0("data_DRYAD/BayPassGEAAnalysis/AlleleCounts_",dim(geno)[2],"snps",dim(geno)[1],"clones.csv"))
+
+df[1:10,1:10] %>% 
+  kable() %>%  
+  kable_styling(font_size=12,
+                bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
+
+dfsum1  <- df %>% column_to_rownames(var="prov") %>% select(contains("sum")) %>%  t()   # count of the first allele (minor allele)
+dfsum2  <- df %>% column_to_rownames(var="prov") %>% select(contains("count")) %>%  t() # count of the second allele (major allele)
+
+colnames(dfsum1) <- paste0(df$prov,"1")
+colnames(dfsum2) <- paste0(df$prov,"2")
+
+rownames(dfsum1) <- str_sub(rownames(dfsum1),1,-5)
+rownames(dfsum2) <- str_sub(rownames(dfsum2),1,-18)
+
+# identical(rownames(dfsum1), rownames(dfsum2)) # check that the rownames (SNP names) are still the same and in the same order (that's ok!).
+
+DF <- cbind(dfsum1,dfsum2) %>% as_tibble %>% 
+  select(sort(tidyselect::peek_vars()))
+
+DF[1:10,1:10] %>% 
+  kable() %>%  
+  kable_styling(font_size=12,
+                bootstrap_options = c("stripped","hover", "condensed"), full_width = F)
+
+# We save the file in the format required by BayPass
+write.table(DF, 
+            file = paste0("data_DRYAD/BayPassGEAAnalysis/PreFileBayPass_",dim(geno)[2],"snps",dim(geno)[1],"clones"), 
+            sep = " ",
+            row.names = FALSE, 
+            col.names = FALSE) # works either with .txt or no extension
+```
+
+
+
+
+## Environmental data
+
+Here the set of environmental covariates we use in the present paper.
+
+Burned area: `BurnedArea`: the  average of the monthly burned area from June 1995 to December 2014 (hectares).
+
+Topographic variable:`TRI`: topographic ruggedness index (unitless)
+
+Soil variables:
+
+  - `water_top` = the total available water content (mm)
+  - `depth_roots` = depth available to roots (cm)
+
+
+Climatic variables from WordClim (average for the years 1970-2000):
+
+  - `bio5`: max temperature of the warmest month (°C)
+  - `bio6`: min temperature of the coldest month (°C)
+  - `bio12`: annual precipitation (mm)
+  - `bio15`: precipitation seasonality (coefficient of variation)
+
+```{r SelectedEnvVariables}
+# Names  of the environmental variables of interest in the dataset:
+select.var <- c("bio5WC_prov",
+                "bio6WC_prov",
+                "bio12WC_prov",
+                "bio15WC_prov",
+                "water_top_prov",
+                "depth_roots_prov",
+                "TRI",
+                "BurnedArea")
+```
+
+
+```{r LoadEnvPopStructureData}
+env <- read.csv("data_DRYAD/PhenoEnvPopStructureDataset.csv") %>% 
+  dplyr::select(prov,all_of(select.var)) %>% 
+  dplyr::rename(bio5="bio5WC_prov",
+                bio6="bio6WC_prov",
+                bio12="bio12WC_prov",
+                bio15="bio15WC_prov",
+                water_top="water_top_prov",
+                depth_roots="depth_roots_prov") %>% 
+  unique()
+
+identical(env$prov, df$prov) # provenances are in the same order as in the genomic data
+
+# Names of the variables we are going to use in the document
+select.var <- c("bio5",
+                "bio6",
+                "bio12",
+                "bio15",
+                "water_top",
+                "depth_roots",
+                "TRI",
+                "BurnedArea")
+
+env <- env %>% dplyr::select(-prov) %>%  t() %>% round(3)
+
+# We save one table per covariate
+for(i in select.var){
+  write.table(as.data.frame(t(env[i,])), file = paste0("data_DRYAD/BayPassGEAAnalysis/EnvironmentalVariables/",i), 
+              sep = " ",
+              row.names = FALSE, 
+              col.names = FALSE)
+}
+```
+
+
+# Estimating the popupation covariance matrix
+
+## The core model
+
+We estimate the (scaled) covariance matrix of population allele frequencies $\Omega$ resulting from their (possibly unknown and complex) shared history. For that, we use the core model mode of <span style="font-variant:small-caps;">BayPass</span>. According to <span style="font-variant:small-caps;">BayPass</span> manual, "The core model depicted in Figure 1A might be viewed as a generalization
+of the model proposed by Nicholson *et al*. (2002) and was first proposed by Coop et al. (2010)." Here is the **Figure 1A from the <span style="font-variant:small-caps;">BayPass</span> manual:**
+
+![](CoreModelBayPass.png)
+
+In the section 6 of the <span style="font-variant:small-caps;">BayPass</span> manual, they advise to check the convergence of the MCMC runs by running several independant runs (with different `-seed` option). I do not understand if this is the case also for the estimation of the covariance matrix $\Omega$. In case, we are going to do it. 
+
+
+## Estimation & visualization
+
+Here is the first run to estimate the covariance matrix $\Omega$:
+
+```{bash EstimateOmegaRun1, eval=F}
+# Working directory: data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -outprefix anacore1 \
+    -seed 44
+```
+
+
+Let's visualize the results.
+
+```{r VisualizeOmega, fig.height=8,fig.width=10}
+# Upload the estimated Omega matrix
+omega=as.matrix(read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore1_mat_omega.out"))
+prov.names <- df$prov
+dimnames(omega)=list(prov.names,prov.names)
+
+# Visualization of the matrix
+# Using SVD decomposition
+plot.omega(omega=omega,pop.names=prov.names)
+
+# as a correlation plot
+cor.mat=cov2cor(omega)
+corrplot(cor.mat,method="color",mar=c(2,1,2,2)+0.1,
+main=expression("Correlation map based on"~hat(Omega)))
+
+# as a heatmap and hierarchical clustering tree (using the average agglomeration method)
+hclust.ave <- function(x) hclust(x, method="average")
+heatmap(1-cor.mat,hclustfun = hclust.ave,
+main=expression("Heatmap of "~hat(Omega)~"("*d[ij]*"=1-"*rho[ij]*")"))
+```
+
+> XtX statistics to identify outlier loci in genome–scan of adaptive differentiation
+
+**From <span style="font-variant:small-caps;">BayPass</span> manual:** "The core model allows scanning the genome for differentiation (covariate-free) using the **$XtX$ statistics** as introduced by @gunther2013robust which is computed by default in BayPass. The main advantage of this approach is to **explicitly account for the covariance structure in population allele frequencies** (via estimating $\Omega$) resulting from the demographic history of the populations."
+
+**From @gunther2013robust:** "Thus $X^{t}X$ is directly analogous to $F_{ST}$ , but it accounts for the variance–covariance structure of the populations in question. [...] This suggests that $X_{l}^{T}X_{l}$ is a natural test statistic to identify loci that deviate away strongly from the multivariate normal distribution, e.g., due to selection. Furthermore, this form naturally accounts for hierarchical population structure or other models of population structure that can confound $F_{ST}$-style outlier analyses (Excoffier et al. 2009). As we do not observe $X_{l}$ and rather obtained a posterior distribution of $X_{l}$, we take the average $X_{l}^{T}X_{l}$ across the sample of $X_{l}$ from our MCMC (we term this $X^{t}X$)."
+
+```{r VisualizeXtX, fig.height=8,fig.width=14}
+xtx <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore1_summary_pi_xtx.out",h=T)
+layout(matrix(1:2,2,1))
+plot(xtx$M_XtX,xlab="SNP",ylab="mean(XtX)",main="Posterior mean of the XtX statistics")
+plot(xtx$SD_XtX,xlab="SNP",ylab="sd(XtX)",main="Posterior standard deviation of the XtX statistics")
+
+#check behavior of the p-values associated to the XtXst estimator
+abline(h=1)
+layout(matrix(1:3,3,1))
+hist(10**(-1*xtx$log10.1.pval.),freq=F,breaks=50,main="")
+plot(xtx$XtXst,main="XtXst calibrated estimator of the XtX statistic",ylab="XtXst")
+plot(xtx$log10.1.pval.,main="P-value (-log10 scale) of the XtXst calibrator",ylab="p-values")
+abline(h=3,lty=2) #0.001 p--value theshold
+```
+
+**From <span style="font-variant:small-caps;">BayPass</span> manual:** "If the p–values are not well behaved, one may rather consider calibrating the $XtX$ statistics with PODs. In addition, it should be noticed that for the $XtX$ statistics, the p-values are computed assuming a bilateral test. Hence, one may check the $XtX$ value to distinguish positive (high $XtX$) from balancing (small $XtX$) selection."
+
+
+## Comparison with four independant runs
+
+```{bash EstimateOmegaIndependantRuns, eval=F}
+# Working directory: data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -outprefix anacore2 \
+    -seed 444
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -outprefix anacore3 \
+    -seed 204
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -outprefix anacore4 \
+    -seed 284
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -outprefix anacore5 \
+    -seed 428
+```
+
+
+Let's compare the **posterior means** and **posterior standard deviations** of each element of the $npop \times npop$ scaled population allele frequencies covariance matrix $\Omega$.
+
+```{r CheckingConvergenceEstimatesOmega, eval=F}
+# posterior means
+m1 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore1_summary_lda_omega.out",h=T)$M_omega_ij
+m2 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore2_summary_lda_omega.out",h=T)$M_omega_ij
+m3 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore3_summary_lda_omega.out",h=T)$M_omega_ij
+m4 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore4_summary_lda_omega.out",h=T)$M_omega_ij
+m5 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore5_summary_lda_omega.out",h=T)$M_omega_ij
+cor(data.frame(m1,m2,m3,m4,m5))
+
+# posterior standard deviations
+sd1 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore1_summary_lda_omega.out",h=T)$SD_omega_ij
+sd2 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore2_summary_lda_omega.out",h=T)$SD_omega_ij
+sd3 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore3_summary_lda_omega.out",h=T)$SD_omega_ij
+sd4 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore4_summary_lda_omega.out",h=T)$SD_omega_ij
+sd5 <- read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore5_summary_lda_omega.out",h=T)$SD_omega_ij
+cor(data.frame(sd1,sd2,sd3,sd4,sd5))
+```
+
+<span style="color: red;">Estimates of $\Omega$ across independant runs are highly similar, so **we can conclude that the chains properly converged and that the estimation of $\Omega$ is robust and reproducible**.</span>
+
+```{r ComparisonOmegaMatrices, eval=F}
+# Comparison from the BayPass manual
+omega1=as.matrix(read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore1_mat_omega.out"))
+omega2=as.matrix(read.table("data_DRYAD/BayPassGEAAnalysis/CovarianceMatrixOmega/anacore2_mat_omega.out"))
+
+plot(omega1,omega2) ; abline(a=0,b=1)
+fmd.dist(omega1,omega2)
+```
+
+# IS standard covariate model
+
+The standard covariate model is represented in the following figure (**Figure 1B from the <span style="font-variant:small-caps;">BayPass</span> the manual**):
+
+
+![](StandardModelBayPass.png)
+
+According to <span style="font-variant:small-caps;">BayPass</span> manual, "This model allows evaluating to which extent a population covariable $k$ is (linearly) associated with each marker $i$ (which are assumed independent given $\Omega$) by the introduction of the regression coefficients $\beta_{ik}$ (for convenience the indices $k$ for covariables are dropped in Figure 1B)."
+
+
+From <span style="font-variant:small-caps;">BayPass</span> manual: "Importance Sampling (IS) approximation allows estimating Bayes Factor to evaluate the support in favor of **association of each SNP $i$ with a covariable $k$**, i.e., to compare the model with association ($\beta_{ik} \neq 0$) against the null model ($\beta_{ik} = 0$). The IS based estimation was initially proposed by Coop et al. (2010) and is based on a numerical integration that requires the definition of a grid covering the whole support of the $\beta_{ik}$ prior distribution. In <span style="font-variant:small-caps;">BayPass</span>, the grid consists of $n_{\beta}$ (by default $n_{\beta} = 201$) equidistant points from $\beta_{min}$ to $\beta_{max}$ (including the boundaries) leading to a lag between two successive values equal to $\frac{\beta_{max}-\beta_{min}}{n_{\beta}-1}$ (i.e., 0.003 with default values). Other values for $n_{\beta}$ might be supplied by the user with the `-nbetagrid` option."
+
+
+**Checking convergence by running several independant runs:**
+
+  - From <span style="font-variant:small-caps;">BayPass</span> manual: "As for any MCMC analysis, it is recommended to run several independent MCMC (e.g., from 3 to 5), using different seeds for the random number generators (see `-seed` option). Comparing the estimates of parameters like $\Omega$ and statistics like $XtX$ or BF across runs allows ensuring (**empirically**) that the chains properly converged. For large enough data sets, estimations are generally reproducible for most parameters and statistics. Yet, for measures like the BF$_{is}$ that are based on an Importance Sampling approximation, single run estimations may be unstable (in particular when the number of populations is small), it is then recommended to use as an estimate the median computed over several different independent runs (for a real life example see @gautier2018genomic)."
+
+  - In @gautier2018genomic: "Three independent runs (using the option `-seed`) were performed for each dataset. The estimated model hyper-parameters were highly consistent across both runs and datasets. Support for association of each SNP with the corresponding prevalence covariate was then evaluated using the median Bayes Factor (BF) computed over the three independent runs."
+
+Therefore, to check convergence, we run **5 independant runs** (different `-seed` options).
+
+## Estimation and visualization
+
+```{r CreatedfIS}
+dfIS <- data.frame("BF.threshold"=c(20,10,5))
+dfIS.eBP <- data.frame("eBP.threshold"=c(3))
+```
+
+**Which threshold do we choose?**
+
+```{r thresholdIS}
+threshold <- 5 # in dB
+```
+
+
+### bio 5
+
+Maximum temperature of the warmest month (°C)
+
+```{r}
+var <- "bio5"
+```
+
+
+```{bash ISrunsBio5, eval=F}
+# Wroking directory: data_DRYAD/BayPassGEAAnalysis/ISruns_bio5
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio5 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis1 \
+    -seed 44
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio5 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis2 \
+    -seed 444
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio5 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis3 \
+    -seed 204
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio5 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis4 \
+    -seed 284
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio5 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis5 \
+    -seed 428
+```
+
+Plotting the first run:
+
+```{r PlotsISCovariateModelBio5, fig.height=10,fig.width=14,eval=T}
+covis.snp.res <- read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis1_summary_betai_reg.out"),h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+Checking whether the 5 runs are consistent. 
+
+```{r CheckingConvergenceISBio5, eval=T}
+# Bayes factors
+BF <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$BF.dB.
+}) %>% 
+  setNames(paste0("BF",1:5)) %>% 
+  as.data.frame()
+cor(BF)
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_pi_xtx.out"),h=T)$XtXst
+}) %>% 
+  setNames(paste0("XtXst",1:5)) %>% 
+  as.data.frame()
+cor(XtXst)
+
+# Regression coefficients Beta_is
+beta <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$Beta_is
+}) %>% 
+  setNames(paste0("beta",1:5)) %>% 
+  as.data.frame()
+cor(beta)
+
+# Empirical Bayesian P-values eBPis
+eBP <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$eBPis
+}) %>% 
+  setNames(paste0("eBP",1:5)) %>% 
+  as.data.frame()
+cor(eBP)
+```
+
+```{r IdentifySNPsISCovariateModelBio5,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(BF,1,median),
+                  medianBeta=apply(beta,1,median),
+                  medianEBP=apply(eBP,1,median))
+
+dfIS.eBP <- dfIS.eBP %>% mutate({{var}} :=c(length(which(outIS$medianEBP>3))))
+
+dfIS <- dfIS %>% mutate({{var}} :=c(length(which(outIS$medianBF>20)),
+                                    length(which(outIS$medianBF>10)),
+                                    length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- var
+candBaypass.IS <- outIS[which(outIS$medianBF>threshold),]
+candBaypass.IS
+```
+
+<span style="color: red;"> `r nrow(candBaypass.IS)` candidate associated with `bio5` (maximum temperature of the warmest month). </span>
+
+
+### bio 6
+
+minimum temperature of the coldest month (°C)
+
+```{r}
+var <- "bio6"
+```
+
+```{bash ISrunsBio6, eval=F}
+# Working directory: data_DRYAD/BayPassGEAAnalysis/ISruns_bio6
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio6 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis1 \
+    -seed 44
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio6 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis2 \
+    -seed 444
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio6 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis3 \
+    -seed 204
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio6 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis4 \
+    -seed 284
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio6 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis5 \
+    -seed 428
+```
+
+Plotting the first run:
+
+```{r PlotsISCovariateModelBio6, fig.height=10,fig.width=14,eval=T}
+covis.snp.res <- read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis1_summary_betai_reg.out"),h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+Checking whether the 5 runs are consistent. 
+
+```{r CheckingConvergenceISBio6, eval=T}
+# Bayes factors
+BF <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$BF.dB.
+}) %>% 
+  setNames(paste0("BF",1:5)) %>% 
+  as.data.frame()
+cor(BF)
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_pi_xtx.out"),h=T)$XtXst
+}) %>% 
+  setNames(paste0("XtXst",1:5)) %>% 
+  as.data.frame()
+cor(XtXst)
+
+# Regression coefficients Beta_is
+beta <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$Beta_is
+}) %>% 
+  setNames(paste0("beta",1:5)) %>% 
+  as.data.frame()
+cor(beta)
+
+# Empirical Bayesian P-values eBPis
+eBP <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$eBPis
+}) %>% 
+  setNames(paste0("eBP",1:5)) %>% 
+  as.data.frame()
+cor(eBP)
+```
+
+```{r IdentifySNPsISCovariateModelBio6,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(BF,1,median),
+                  medianBeta=apply(beta,1,median),
+                  medianEBP=apply(eBP,1,median))
+
+dfIS.eBP <- dfIS.eBP %>% mutate({{var}} :=c(length(which(outIS$medianEBP>3))))
+
+dfIS <- dfIS %>% mutate({{var}} :=c(length(which(outIS$medianBF>20)),
+                                    length(which(outIS$medianBF>10)),
+                                    length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- var
+outIS[which(outIS$medianBF>threshold),]
+candBaypass.IS <- bind_rows(candBaypass.IS,outIS[which(outIS$medianBF>threshold),])
+```
+
+
+<span style="color: red;"> `r nrow(candBaypass.IS[candBaypass.IS$COVARIABLE=="bio6",])` candidates associated with `bio6` (minimum temperature of the coldest month). </span>
+
+
+
+
+### bio 12
+
+Annual precipitation (mm)
+
+```{r}
+var <- "bio12"
+```
+
+```{bash ISrunsBio12, eval=F}
+# Working directory: data_DRYAD/BayPassGEAAnalysis/ISruns_bio12
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio12 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis1 \
+    -seed 44
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio12 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis2 \
+    -seed 444
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio12 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis3 \
+    -seed 204
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio12 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis4 \
+    -seed 284
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio12 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis5 \
+    -seed 428
+```
+
+Plotting the first run:
+
+```{r PlotsISCovariateModelBio12, fig.height=10,fig.width=14,eval=T}
+covis.snp.res <- read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis1_summary_betai_reg.out"),h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+Checking whether the 5 runs are consistent. 
+
+```{r CheckingConvergenceISBio12, eval=T}
+# Bayes factors
+BF <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$BF.dB.
+}) %>% 
+  setNames(paste0("BF",1:5)) %>% 
+  as.data.frame()
+cor(BF)
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_pi_xtx.out"),h=T)$XtXst
+}) %>% 
+  setNames(paste0("XtXst",1:5)) %>% 
+  as.data.frame()
+cor(XtXst)
+
+# Regression coefficients Beta_is
+beta <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$Beta_is
+}) %>% 
+  setNames(paste0("beta",1:5)) %>% 
+  as.data.frame()
+cor(beta)
+
+# Empirical Bayesian P-values eBPis
+eBP <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$eBPis
+}) %>% 
+  setNames(paste0("eBP",1:5)) %>% 
+  as.data.frame()
+cor(eBP)
+```
+
+```{r IdentifySNPsISCovariateModelBio12,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(BF,1,median),
+                  medianBeta=apply(beta,1,median),
+                  medianEBP=apply(eBP,1,median))
+
+dfIS.eBP <- dfIS.eBP %>% mutate({{var}} :=c(length(which(outIS$medianEBP>3))))
+
+dfIS <- dfIS %>% mutate({{var}} :=c(length(which(outIS$medianBF>20)),
+                                    length(which(outIS$medianBF>10)),
+                                    length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- var
+outIS[which(outIS$medianBF>threshold),]
+candBaypass.IS <- bind_rows(candBaypass.IS,outIS[which(outIS$medianBF>threshold),])
+```
+
+<span style="color: red;"> No candidate associated with `bio12` (annual precipitation). </span>
+
+### bio 15
+
+Precipitation Seasonality (Coefficient of Variation)
+
+```{r}
+var <- "bio15"
+```
+
+
+```{bash ISrunsBio15, eval=F}
+# Working directory: data_DRYAD/BayPassGEAAnalysis/ISruns_bio15
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio15 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis1 \
+    -seed 44
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio15 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis2 \
+    -seed 444
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio15 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis3 \
+    -seed 204
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio15 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis4 \
+    -seed 284
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/bio15 \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis5 \
+    -seed 428
+```
+
+Plotting the first run:
+
+```{r PlotsISCovariateModelBio15, fig.height=10,fig.width=14,eval=T}
+covis.snp.res <- read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis1_summary_betai_reg.out"),h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+Checking whether the 5 runs are consistent. 
+
+```{r CheckingConvergenceISBio15, eval=T}
+# Bayes factors
+BF <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$BF.dB.
+}) %>% 
+  setNames(paste0("BF",1:5)) %>% 
+  as.data.frame()
+cor(BF)
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_pi_xtx.out"),h=T)$XtXst
+}) %>% 
+  setNames(paste0("XtXst",1:5)) %>% 
+  as.data.frame()
+cor(XtXst)
+
+# Regression coefficients Beta_is
+beta <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$Beta_is
+}) %>% 
+  setNames(paste0("beta",1:5)) %>% 
+  as.data.frame()
+cor(beta)
+
+
+# Empirical Bayesian P-values eBPis
+eBP <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$eBPis
+}) %>% 
+  setNames(paste0("eBP",1:5)) %>% 
+  as.data.frame()
+cor(eBP)
+```
+
+```{r IdentifySNPsISCovariateModelBio15,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(BF,1,median),
+                  medianBeta=apply(beta,1,median),
+                  medianEBP=apply(eBP,1,median))
+
+dfIS.eBP <- dfIS.eBP %>% mutate({{var}} :=c(length(which(outIS$medianEBP>3))))
+
+dfIS <- dfIS %>% mutate({{var}} :=c(length(which(outIS$medianBF>20)),
+                                    length(which(outIS$medianBF>10)),
+                                    length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- var
+outIS[which(outIS$medianBF>threshold),]
+candBaypass.IS <- bind_rows(candBaypass.IS,outIS[which(outIS$medianBF>threshold),])
+```
+
+<span style="color: red;"> No candidate associated with `bio15` (precipitation Seasonality). </span>
+
+
+### water_top
+
+Total available water content
+
+
+```{r}
+var <- "water_top"
+```
+
+```{bash ISrunsWaterTop, eval=F}
+# Working directory: data_DRYAD/BayPassGEAAnalysis/ISruns_water_top
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/water_top \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis1 \
+    -seed 44
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/water_top \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis2 \
+    -seed 444
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/water_top \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis3 \
+    -seed 204
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/water_top \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis4 \
+    -seed 284
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/water_top \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis5 \
+    -seed 428
+```
+
+Plotting the first run:
+
+```{r PlotsISCovariateModelWaterTop, fig.height=10,fig.width=14,eval=T}
+covis.snp.res <- read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis1_summary_betai_reg.out"),h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+Checking whether the 5 runs are consistent. 
+
+```{r CheckingConvergenceISWaterTop, eval=T}
+# Bayes factors
+BF <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$BF.dB.
+}) %>% 
+  setNames(paste0("BF",1:5)) %>% 
+  as.data.frame()
+cor(BF)
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_pi_xtx.out"),h=T)$XtXst
+}) %>% 
+  setNames(paste0("XtXst",1:5)) %>% 
+  as.data.frame()
+cor(XtXst)
+
+# Regression coefficients Beta_is
+beta <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$Beta_is
+}) %>% 
+  setNames(paste0("beta",1:5)) %>% 
+  as.data.frame()
+cor(beta)
+
+# Empirical Bayesian P-values eBPis
+eBP <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$eBPis
+}) %>% 
+  setNames(paste0("eBP",1:5)) %>% 
+  as.data.frame()
+cor(eBP)
+```
+
+```{r IdentifySNPsISCovariateModelWaterTop,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(BF,1,median),
+                  medianBeta=apply(beta,1,median),
+                  medianEBP=apply(eBP,1,median))
+
+dfIS.eBP <- dfIS.eBP %>% mutate({{var}} :=c(length(which(outIS$medianEBP>3))))
+
+dfIS <- dfIS %>% mutate({{var}} :=c(length(which(outIS$medianBF>20)),
+                                    length(which(outIS$medianBF>10)),
+                                    length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- var
+outIS[which(outIS$medianBF>threshold),]
+candBaypass.IS <- bind_rows(candBaypass.IS,outIS[which(outIS$medianBF>threshold),])
+```
+
+<span style="color: red;"> No candidate associated with `water_top` (total available water content). </span>
+
+### depth_roots
+
+Depth available to roots
+
+```{r}
+var <- "depth_roots"
+```
+
+Minimum temperature of the coldest month (°C)
+
+```{bash ISrunsDepthRoots, eval=F}
+# Working directory: data_DRYAD/BayPassGEAAnalysis/ISruns_depth_roots
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/depth_roots \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis1 \
+    -seed 44
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/depth_roots \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis2 \
+    -seed 444
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/depth_roots \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis3 \
+    -seed 204
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/depth_roots \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis4 \
+    -seed 284
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/depth_roots \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis5 \
+    -seed 428
+```
+
+Plotting the first run:
+
+```{r PlotsISCovariateModelDepthRoots, fig.height=10,fig.width=14,eval=T}
+covis.snp.res <- read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis1_summary_betai_reg.out"),h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+Checking whether the 5 runs are consistent. 
+
+```{r CheckingConvergenceISDepthRoots, eval=T}
+# Bayes factors
+BF <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$BF.dB.
+}) %>% 
+  setNames(paste0("BF",1:5)) %>% 
+  as.data.frame()
+cor(BF)
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_pi_xtx.out"),h=T)$XtXst
+}) %>% 
+  setNames(paste0("XtXst",1:5)) %>% 
+  as.data.frame()
+cor(XtXst)
+
+# Regression coefficients Beta_is
+beta <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$Beta_is
+}) %>% 
+  setNames(paste0("beta",1:5)) %>% 
+  as.data.frame()
+cor(beta)
+
+# Empirical Bayesian P-values eBPis
+eBP <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$eBPis
+}) %>% 
+  setNames(paste0("eBP",1:5)) %>% 
+  as.data.frame()
+cor(eBP)
+```
+
+```{r IdentifySNPsISCovariateModelDepthRoots,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(BF,1,median),
+                  medianBeta=apply(beta,1,median),
+                  medianEBP=apply(eBP,1,median))
+
+dfIS.eBP <- dfIS.eBP %>% mutate({{var}} :=c(length(which(outIS$medianEBP>3))))
+
+dfIS <- dfIS %>% mutate({{var}} :=c(length(which(outIS$medianBF>20)),
+                                    length(which(outIS$medianBF>10)),
+                                    length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- var
+outIS[which(outIS$medianBF>threshold),]
+candBaypass.IS <- bind_rows(candBaypass.IS,outIS[which(outIS$medianBF>threshold),])
+```
+
+<span style="color: red;"> No candidate associated with `depth_roots` (depth available to roots). </span>
+
+### TRI
+
+Topographic ruggedness index
+
+```{r}
+var <- "TRI"
+```
+
+```{bash ISrunsTRI, eval=F}
+# Working directory: data_DRYAD/BayPassGEAAnalysis/ISruns_TRI
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/TRI \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis1 \
+    -seed 44
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/TRI \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis2 \
+    -seed 444
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/TRI \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis3 \
+    -seed 204
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/TRI \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis4 \
+    -seed 284
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/TRI \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis5 \
+    -seed 428
+```
+
+Plotting the first run:
+
+```{r PlotsISCovariateModelTRI, fig.height=10,fig.width=14,eval=T}
+covis.snp.res <- read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis1_summary_betai_reg.out"),h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+Checking whether the 5 runs are consistent. 
+
+```{r CheckingConvergenceISTRI, eval=T}
+# Bayes factors
+BF <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$BF.dB.
+}) %>% 
+  setNames(paste0("BF",1:5)) %>% 
+  as.data.frame()
+cor(BF)
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_pi_xtx.out"),h=T)$XtXst
+}) %>% 
+  setNames(paste0("XtXst",1:5)) %>% 
+  as.data.frame()
+cor(XtXst)
+
+# Regression coefficients Beta_is
+beta <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$Beta_is
+}) %>% 
+  setNames(paste0("beta",1:5)) %>% 
+  as.data.frame()
+cor(beta)
+
+# Empirical Bayesian P-values eBPis
+eBP <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$eBPis
+}) %>% 
+  setNames(paste0("eBP",1:5)) %>% 
+  as.data.frame()
+cor(eBP)
+```
+
+```{r IdentifySNPsISCovariateModelTRI,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(BF,1,median),
+                  medianBeta=apply(beta,1,median),
+                  medianEBP=apply(eBP,1,median))
+
+dfIS.eBP <- dfIS.eBP %>% mutate({{var}} :=c(length(which(outIS$medianEBP>3))))
+
+dfIS <- dfIS %>% mutate({{var}} :=c(length(which(outIS$medianBF>20)),
+                                    length(which(outIS$medianBF>10)),
+                                    length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- var
+outIS[which(outIS$medianBF>threshold),]
+candBaypass.IS <- bind_rows(candBaypass.IS,outIS[which(outIS$medianBF>threshold),])
+```
+
+
+<span style="color: red;"> No candidate associated with `TRI` (topographic ruggedness index). </span>
+
+### BurnedArea
+
+```{r}
+var <- "BurnedArea"
+```
+
+```{bash ISrunsBurnedArea, eval=F}
+# Working directory: data_DRYAD/BayPassGEAAnalysis/ISruns_BurnedArea
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/BurnedArea \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis1 \
+    -seed 44
+    
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/BurnedArea \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis2 \
+    -seed 444
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/BurnedArea \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis3 \
+    -seed 204
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/BurnedArea \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis4 \
+    -seed 284
+
+~/Bureau/baypass_2.2/sources/g_baypass \
+    -gfile ../PreFileBayPass_9817snps454clones \
+    -efile ../EnvironmentalVariables/BurnedArea \
+    -omegafile ../CovarianceMatrixOmega/anacore1_mat_omega.out \
+    -outprefix anacovis5 \
+    -seed 428
+```
+
+Plotting the first run:
+
+```{r PlotsISCovariateModelBurnedArea, fig.height=10,fig.width=14,eval=T}
+covis.snp.res <- read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis1_summary_betai_reg.out"),h=T)
+layout(matrix(1:3,3,1))
+plot(covis.snp.res$BF.dB.,xlab="SNP",ylab="BFis (in dB)",main="Estimates of the Bayes Factor")
+plot(covis.snp.res$eBPis,xlab="SNP",ylab="eBPis",main="Empirical Bayesian P-value")
+plot(covis.snp.res$Beta_is,xlab="SNP",ylab=expression(beta~"coefficient"),main="Estimates of the regression coefficients")
+```
+
+Checking whether the 5 runs are consistent. 
+
+```{r CheckingConvergenceISBurnedArea, eval=T}
+# Bayes factors
+BF <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$BF.dB.
+}) %>% 
+  setNames(paste0("BF",1:5)) %>% 
+  as.data.frame()
+cor(BF)
+
+# XtXst (calibrated estimator of the XtX statistic)
+XtXst <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_pi_xtx.out"),h=T)$XtXst
+}) %>% 
+  setNames(paste0("XtXst",1:5)) %>% 
+  as.data.frame()
+cor(XtXst)
+
+# Regression coefficients Beta_is
+beta <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$Beta_is
+}) %>% 
+  setNames(paste0("beta",1:5)) %>% 
+  as.data.frame()
+cor(beta)
+
+# Empirical Bayesian P-values eBPis
+eBP <- lapply(1:5, function(x){
+  read.table(paste0("data_DRYAD/BayPassGEAAnalysis/ISruns_",var,"/anacovis",x,"_summary_betai_reg.out"),h=T)$eBPis
+}) %>% 
+  setNames(paste0("eBP",1:5)) %>% 
+  as.data.frame()
+cor(eBP)
+```
+
+```{r IdentifySNPsISCovariateModelBurnedArea,eval=T}
+outIS <- data.frame(snp=rownames(dfsum1),
+                  medianBF=apply(BF,1,median),
+                  medianBeta=apply(beta,1,median),
+                  medianEBP=apply(eBP,1,median))
+
+dfIS.eBP <- dfIS.eBP %>% mutate({{var}} :=c(length(which(outIS$medianEBP>3))))
+
+dfIS <- dfIS %>% mutate({{var}} :=c(length(which(outIS$medianBF>20)),
+                                    length(which(outIS$medianBF>10)),
+                                    length(which(outIS$medianBF>5))))
+
+outIS$COVARIABLE <- var
+outIS[which(outIS$medianBF>threshold),]
+candBaypass.IS <- bind_rows(candBaypass.IS,outIS[which(outIS$medianBF>threshold),])
+```
+
+<span style="color: red;"> No candidate associated with `BurnedArea` (average of the monthly burned area from June 1995 to December 2014). </span>
+
+## Sum-up candidates
+
+```{r DisplaydCandIS}
+dfIS %>% kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+dfIS.eBP %>% kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+
+candBaypass.IS %>% kable() %>% 
+  kable_styling(bootstrap_options = c("hover", "condensed"), full_width = F)
+```
+
+```{r SaveCandIS}
+write_csv(candBaypass.IS,"data_DRYAD/BayPassGEAAnalysis/CandSNPsBayPassIS.csv")
+```
+
+<span style="color: red;">`r nrow(candBaypass.IS)` SNP candidates:</span>
+  
+  - <span style="color: red;">`r nrow(candBaypass.IS[candBaypass.IS=="bio5",])` associated with `bio5`.</span>
+  
+  - <span style="color: red;">`r nrow(candBaypass.IS[candBaypass.IS=="bio6",])` associated with `bio6`.</span>
+
+
+# References
