@@ -140,6 +140,23 @@ Meaning of the columns:
   - `assay`: Assay in which the clone was genotyped, either the Infinium assay (`only_Inf`), the Axiom assay (`only_Affx`) or both assays (`both_Inf_Affx`).
   
   - `snp_1` --> `snp_14016`:  genotype for each of the 14,016 SNPs.
+
+### SNP codes
+
+**In the dataset `SnpCodesMatching.csv`**
+
+This file contains the correspondence among the SNP codes of the different assays (Axiom and Illumina Infinium), the codes used in the present study and the original SNP codes.
+
+Meaning of the columns:
+
+  - `original_ID`: original SNP ID
+  
+  - `affx_ID`: SNP ID from the Axiom assay.
+  
+  - `infinium_ID`: SNP ID from the Illumina Infinium assay.
+  
+  - `snp_ID`: SNP ID used in the present study.
+  
   
   
 ### Formatted and filtered genomic data
@@ -163,22 +180,65 @@ Same dataset as `FormattedFilteredGenomicData_454clones_9817snps.csv` but with i
 
 9,817 SNPs (in rows), 454 clones (in columns).
 
+### Data for BayPass analysis
 
+**In the folder `BayPassGEAAnalysis`**
 
-### SNP codes
+Associated script: `3_GEAanalyses_BayPass.Rmd`.
 
-**In the dataset `SnpCodesMatching.csv`**
+Input files required for the BayPass analysis are **allele count data**. The file `AlleleCounts_9817snps454clones.csv` contains the counts of the minor allele in each population.
 
-This file contains the correspondence among the SNP codes of the different assays (Axiom and Illumina Infinium), the codes used in the present study and the original SNP codes.
+In BayPass, the input genotyping data file has to be organized as a matrix with *nsnp* rows and *2 ∗ npop* columns (the first two columns correspond to one population, the next two columns to the second population, etc.), with space as row field separator. More details in the [BayPass manual](http://www1.montpellier.inra.fr/CBGP/software/baypass/files/BayPass_manual_2.2.pdf). The file `PreFileBayPass_9817snps454clones` contains the allele count data in the required format. 
 
-Meaning of the columns:
+The input files with the values of the **environmental covariates** for each population are in the subfolder `EnvironmentalVariables`.
 
-  - `original_ID`: original SNP ID
+We first estimated the popupation covariance matrix and the output files are located in the folder `CovarianceMatrixOmega`.
+
+For each environmental covariate, we performed five independant runs of the **standard covariate model** using the **Important Sampling (IS) algorithm**. The outfiles of all independant runs can be found in the covariate-specific folders: `ISruns_bio5`, `ISruns_bio6`, `ISruns_bio12`, `ISruns_bio15`, `ISruns_water_top`, `ISruns_depth_roots`, `ISruns_BurnedArea` and `ISruns_TRI`. 
+
+The **list of candidate SNPs** identified in the BayPass analysis is provided in the file `CandSNPsBayPassIS.csv`. Here is the meaning of the columns:
+
+  - `snp`: SNP ID used in the present study. 
   
-  - `affx_ID`: SNP ID from the Axiom assay.
+  - `medianBF`: **median estimate of the Bayes Factor** in dB units across the five independant runs (measuring the support of the association of each SNP with each environmental covariate).
   
-  - `infinium_ID`: SNP ID from the Illumina Infinium assay.
+  - `medianBeta`: **median estimate of the regression coefficients** ($\beta_i$ in the standard covariate model) across the five independant runs (measuring the strength of the association of each SNP with each environmental covariate).
   
-  - `snp_ID`: SNP ID used in the present study.
+  - `medianEBP`: **median estimate of the empirical Bayesian P-values** in the $\log_{10}$ scale (measuring the support in favor of a non-null regression coefficient).
   
+  -  `COVARIABLE`: **environmental covariate** associated with the candidate SNP.
+
+### Data for RDA analysis
+
+**In the folder `RDAGEAAnalysis`**
+
+Associated script: `4_GEAanalyses_RDA.Rmd`.
+
+The **list of candidate SNPs** identified in the RDA analysis is provided in the file `CandSNPsRDA.csv`. Here is the meaning of the columns:
+
+  - `snp`: SNP ID used in the present study. 
   
+  - `bio5` to `BurnedArea`: correlation coefficients between each candidate SNP and each environmental covariate.
+  
+  - `predictor`: environmental covariate with the highest association with the candidate SNP.
+  
+  - `correlation`: correlation coefficient between the candidate SNP and the environmental covariate with the highest association with the candidate SNP (i.e. the `predictor` of the previsou column).
+
+
+### LD of the three SNP sets
+
+**In the folder `LD`**
+
+Associated script: `5_CreatingFormattingCalculatingLDSubsetsCandidateSNPs.Rmd`.
+
+Outputs of the `LD` function from the *genetics* R package. This function calculates **pairwise linkage disequilibrium between genetic markers** and returns a list of 5 elements, among hich is the LD estimate. 
+
+LD was calculate for the three sets of SNPs: the reference SNPs (file `outputsLDGenetics_Ref.rds`), the merged candidate SNPs (file `outputsLDGenetics_Mer.rds`) and the common candidate SNPs (file `outputsLDGenetics_Com.rds`).
+
+### Genomic input files for the GF and GDM analyses
+
+Associated script: `5_CreatingFormattingCalculatingLDSubsetsCandidateSNPs.Rmd`.
+
+The GF analysis requires **population allele frequencies** as input files. The population allele frequencies of each set of SNPs can be found in the file `ListAlleleFrequencies.rds` (in a list).
+
+The GDM analysis requires **pairwise $F_{ST}$ matrices** as input files. These matrices were calculated for each set of SNPs with the function `pairwise.WCfst` of the *hierfstat* R package and were then scaled, so that the $F_{ST}$ values are between 0 and 1. The pairwise  $F_{ST}$ matrices **before scaling** are stored in a list in the file `ListPairwiseFst.rds`. The pairwise  $F_{ST}$ matrices **after scaling** are stored in the file `ListPairwiseFstScaled.rds`.
