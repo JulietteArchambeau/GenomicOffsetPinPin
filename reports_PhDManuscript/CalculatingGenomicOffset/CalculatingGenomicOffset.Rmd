@@ -247,6 +247,11 @@ data.cg[,"TRI"] <- raster::extract(rast,data.cg[,c("longitude","latitude")])
 rast <- raster("data/FireData/GFED4/PreparedRasters/GFED4_199507_201412_AllCountries.grd")
 data.cg[,"BurnedArea"] <- raster::extract(rast,data.cg[,c("longitude","latitude")])
 
+
+# We save this dataset for the DRYAD repository
+data.cg %>% write_csv("data_DRYAD/EnvDataCommonGarden.csv", append=FALSE)
+
+# We format the dataframe for the gdm analysis:
 data.cg <- data.cg %>%  setNames(c("s2.site","s2.xCoord","s2.yCoord",paste0("s2.",colnames(.)[-c(1:3)])))
 
 data.cg %>% 
