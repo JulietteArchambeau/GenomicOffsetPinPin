@@ -301,8 +301,8 @@ p <-  DF.go %>%
 graphs[[2]] <- graphs[[2]] + theme(legend.position = "none")
 
 grid.graphs <- plot_grid(graphs[[1]],graphs[[2]],nrow=2,labels=c("A)","B)"))
-ggsave(grid.graphs, file="figs/manuscript/ValidationNFI.pdf",device="pdf",height=8,width=10)
-ggsave(grid.graphs, file="figs/manuscript/ValidationNFI.png",height=8,width=10)
+ggsave(grid.graphs, file="figs/PhDmanuscript/ValidationNFI.pdf",device="pdf",height=8,width=10)
+ggsave(grid.graphs, file="figs/PhDmanuscript/ValidationNFI.png",height=8,width=10)
 grid.graphs 
 ```
 
