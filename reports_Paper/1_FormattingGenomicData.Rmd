@@ -440,10 +440,8 @@ We are going to imputate the missing values using the most common allele at each
 We load the dataset in which there is the proportion of belonging of each genotype to a given gene pool [from @jaramillo2015molecular].
 
 ```{r LoadingPropAncestry}
-prop <- read.csv("data_DRYAD/PhenoEnvPopStructureDataset.csv") %>% 
-  dplyr::select(clon,prov,paste0(rep("Q",6),1:6),max.Q) %>%  
-  unique() %>% 
-  drop_na()
+prop <- read.csv("data_DRYAD/PopulationPopStructureEnvData.csv") %>% 
+  dplyr::select(clon,prov,paste0(rep("Q",6),1:6),max.Q)
 ```
 
 We check whether some clones in the genomic dataset we want to use for the following analyses have no population structure data.
