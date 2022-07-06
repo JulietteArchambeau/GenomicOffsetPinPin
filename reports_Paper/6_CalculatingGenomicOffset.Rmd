@@ -129,15 +129,7 @@ stackFutClimSSP585 <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP585/
 
 # Dataset with the value of the env variables for each population
 # ---------------------------------------------------------------
-env <- readRDS(file="data/PhenoEnvPopStructureDataset.RDS") %>% 
-  dplyr::rename(bio5="bio5WC_prov",
-                bio6="bio6WC_prov",
-                bio12="bio12WC_prov",
-                bio15="bio15WC_prov",
-                water_top="water_top_prov",
-                depth_roots="depth_roots_prov",
-                latitude="latitude_prov",
-                longitude="longitude_prov") %>% 
+env <- read.csv("data_DRYAD/PopulationPopStructureEnvData.csv") %>% 
   dplyr::select(prov,latitude,longitude,all_of(select.var)) %>% 
   unique() %>% 
   as_tibble()
@@ -224,16 +216,7 @@ data.cg.gdm <- replicate(34,data.cg,simplify=F) %>%
 
 # Environmental data in the provenances ('s1' columns)
 # ----------------------------------------------------
-data.prov <- read.csv("data_DRYAD/PhenoEnvPopStructureDataset.csv") %>% 
-  dplyr::rename(bio1="bio1WC_prov",
-                bio5="bio5WC_prov",
-                bio6="bio6WC_prov",
-                bio12="bio12WC_prov",
-                bio15="bio15WC_prov",
-                water_top="water_top_prov",
-                depth_roots="depth_roots_prov",
-                latitude="latitude_prov",
-                longitude="longitude_prov") %>% 
+data.prov <- read.csv("data_DRYAD/PopulationPopStructureEnvData.csv") %>% 
   dplyr::select(prov,longitude,latitude,all_of(select.var),bio1) %>% 
   unique() %>% 
   as_tibble() %>% 
@@ -259,7 +242,8 @@ data.pred.gdm <-  data.prov %>%
                 everything()) %>% 
   mutate(s2.yCoord=s1.yCoord,
          s2.xCoord=s1.xCoord,
-         s2.BurnedArea=s1.BurnedArea)
+         s2.BurnedArea=s1.BurnedArea, # !! We fix BurnedArea and TRI so that they have the same values in the common gardens
+         s2.TRI=s1.TRI)
 
 data.pred.gdm[1:10,]  %>% 
   kable(digits=3) %>% 
@@ -410,7 +394,7 @@ dev.off()
 ```
 
 
-```{r GDManalyses,eval=F}
+```{r GDManalyses,eval=T}
 # We use a counter to refer to the different sets of SNPs:
 # set 1 (1st iteration) => reference SNPs
 # set 2 (2nd iteration) => merged candidates
@@ -624,10 +608,10 @@ ProjectingGeneticCompositionGDM(env.rast=stackFutClimSSP585,
 
 # Function to calculate the genomic offset with different rasters of future climate
 GOAcrossRangeWithGDM <- function(x){
-  
+
   rast.pred <- predict.gdm(gdm.mod,               # GDM model
                            stackCurrClimRes25min, # raster with current climate at 2.5 minutes resolution
-                           time=TRUE, 
+                           time=TRUE,
                            predRasts=x)           # Rasters with future climates at 2.5 minutes resolution
   rasValue <- raster::extract(rast.pred, PinpinDistri,cellnumbers=T)
   rasValue <- as.data.frame(rasValue)
@@ -639,20 +623,20 @@ GOAcrossRangeWithGDM <- function(x){
 GO <- lapply(c(stackFutClimSSP370,stackFutClimSSP585), GOAcrossRangeWithGDM)
 names(GO) <- c("SSP370","SSP585")
 
-# convert to DF 
+# convert to DF
 dfGO <- as.data.frame(GO)
 
 # Distribution of the genomic offset for each GCM
-p <- dfGO %>% 
-  pivot_longer(cols=everything(),names_to="model",values_to="go") %>% 
-  ggplot(aes(x=go,color=model)) + 
+p <- dfGO %>%
+  pivot_longer(cols=everything(),names_to="model",values_to="go") %>%
+  ggplot(aes(x=go,color=model)) +
     geom_density(size=1.5) +
-    theme_bw() + 
+    theme_bw() +
     theme(legend.position = c(0.8,0.8)) +
     labs(color="Scenario of future climate:") +
     xlab("Genomic offset")
 ggsave(p,
-       file=paste0("outputs_paper/GDM/GenomicOffset/DensityPlotGenomicOffset_",snp.sets.codes[[counter]],"_GDM.pdf"), 
+       file=paste0("outputs_paper/GDM/GenomicOffset/DensityPlotGenomicOffset_",snp.sets.codes[[counter]],"_GDM.pdf"),
        device = "pdf")
 
 
@@ -663,12 +647,12 @@ rasValue <- as.data.frame(rasValue)
 rasValue <- na.omit(rasValue)
 
 lapply(c("SSP370","SSP585"), function(x){
-  
+
   rast.go[rasValue$cell] <- dfGO[,x]
 
 # Figures with the same scale:
 pdf(paste0("outputs_paper/GDM/GenomicOffset/MapGenomicOffset_FixedScale_",x,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
-plot(background,col=grayscale_colors, 
+plot(background,col=grayscale_colors,
      axes=FALSE,
      #main=paste0("Genomic offset - ",x),
      legend=F)
@@ -678,11 +662,11 @@ plot(rast.go,box = FALSE,
      zlim=c(0,0.4),
      add=T,
      bgalpha=0)
-dev.off()  
+dev.off()
 
 # Figures with different scales:
 pdf(paste0("outputs_paper/GDM/GenomicOffset/MapGenomicOffset_VaryingScale_",x,"_",snp.sets.codes[[counter]],"_GDM.pdf"))
-plot(background,col=grayscale_colors, 
+plot(background,col=grayscale_colors,
      axes=FALSE,
      legend=F)
 plot(rast.go,box = FALSE,
@@ -690,16 +674,16 @@ plot(rast.go,box = FALSE,
      col=colorRampPalette(c("blue","yellow","red"))(255),
      add=T,
      bgalpha=0)
-dev.off()  
+dev.off()
 
 
   # Extract the genomic offset values for the NFI plots
   # ---------------------------------------------------
-  GO.nfi <- NFIdata %>% 
+  GO.nfi <- NFIdata %>%
   mutate(GO =raster::extract(rast.go,NFIdata[,c("longitude","latitude")]))
 
   saveRDS(GO.nfi,file=paste0("outputs_paper/GDM/ExtractedGenomicOffsetNFI/nfiGO_",x,"_",snp.sets.codes[[counter]],".rds"))
-  
+
 })
 
   
@@ -709,7 +693,7 @@ dev.off()
 data.pred.gdm$GO <- predict.gdm(gdm.mod,data.pred.gdm)
 data.pred.gdm <- data.pred.gdm %>% 
   dplyr::select(-distance,-weights,-s2.xCoord,-s2.yCoord) %>% # remove fake coordinates of the sites
-  inner_join(data.cg[,c("s2.site","s2.bio5", "s2.bio6", "s2.bio12", "s2.bio15", "s2.water_top", "s2.depth_roots", "s2.TRI", "s2.bio1")]) %>% 
+  inner_join(data.cg[,c("s2.site","s2.bio5", "s2.bio6", "s2.bio12", "s2.bio15", "s2.water_top", "s2.depth_roots", "s2.bio1")]) %>% # remove  "s2.TRI" here
   inner_join(data.prov[,c("s1.prov","s1.xCoord", "s1.yCoord","s1.bio1")])
 saveRDS(data.pred.gdm,file=paste0("outputs_paper/GDM/ExtractedGenomicOffsetCG/CGGO_",snp.sets.codes[[counter]],".rds"))
 
@@ -897,7 +881,7 @@ dev.off()
 ```
 
 
-```{r GFanalyses,eval=F}
+```{r GFanalyses,eval=T}
 counter <- 0 
 # We use a counter to refer to the different sets of SNPs:
 # set 1 (1st iteration) => reference SNPs
@@ -943,9 +927,9 @@ SNPs <- df %>% dplyr::select(contains("snp"))
 gf <- readRDS(file=paste0("outputs_paper/GF/ModelRuns/Models/GFmodel_",snp.sets.codes[[counter]],".rds"))
 
 # Save the mean R^2 of the individual SNP models
-saveRDS(c(mean(gf$result),
-          min(gf$result),
-          max(gf$result)),file=paste0("outputs_paper/GF/ModelRuns/Outputs/",snp.sets.codes[[counter]],".rds"))
+# saveRDS(c(mean(gf$result),
+#           min(gf$result),
+#           max(gf$result)),file=paste0("outputs_paper/GF/ModelRuns/Outputs/",snp.sets.codes[[counter]],".rds"))
 
 # Figures on variable and overall importance
 # ------------------------------------------
@@ -1030,7 +1014,7 @@ CalculateGOGF(rast.fut=stackFutClimSSP585,    # Scenario SSP5-8.5
   
   data.pred.gdm <- data.pred.gdm %>% 
   dplyr::select(-distance,-weights,-s2.xCoord,-s2.yCoord) %>% # remove fake coordinates of the sites
-  inner_join(data.cg[,c("s2.site","s2.bio5", "s2.bio6", "s2.bio12", "s2.bio15", "s2.water_top", "s2.depth_roots", "s2.TRI", "s2.bio1")]) %>% 
+  inner_join(data.cg[,c("s2.site","s2.bio5", "s2.bio6", "s2.bio12", "s2.bio15", "s2.water_top", "s2.depth_roots", "s2.bio1")]) %>% # remove  "s2.TRI" here 
   inner_join(data.prov[,c("s1.prov","s1.xCoord", "s1.yCoord","s1.bio1")])
   saveRDS(data.pred.gdm,file=paste0("outputs_paper/GF/ExtractedGenomicOffsetCG/CGGO_",snp.sets.codes[[counter]],".rds"))
   
