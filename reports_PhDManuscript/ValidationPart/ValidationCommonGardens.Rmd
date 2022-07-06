@@ -175,6 +175,13 @@ TestIdentityDF(sel.site= "madrid", colum.site ="MAD_survdec11")
 ```
 
 
+```{r SurvivalDataDRYAD}
+# We save the survival data in the DRYAD repository:
+data %>% 
+  dplyr::select(site,block,prov,clon,tree,survival) %>% 
+  dplyr::filter(site %in% c("caceres","madrid")) %>% 
+  write_csv("data_DRYAD/SurvivalDataCommonGarden.csv",append = FALSE)
+```
 
 
 ## Run the models
@@ -215,7 +222,7 @@ DFint <- sapply(vars,function(x){
   stanlist <- list(N=length(subdf$prov),
                    NbDead=subdf$dead.count,
                    NbTot=subdf$tot.count,
-                   H=(subdf$height-mean(subdf$height)/sd(subdf$height)),
+                   H=(subdf$height-mean(subdf$height)/sd(subdf$height)), # There is a mistake here!
                    X=(X -mean(X))/sd(X))
 
   # Running the model
@@ -409,6 +416,18 @@ ExpDesignTab[,-1] %>%
 
 
 # Height models
+
+```{r HeightDataDRYAD, eval=F}
+# We save the height data in the DRYAD repository:
+data <- readRDS(file="data/ClonapinData/PhenoDataNovember2019_AnnualTraits_UpdatedSept2021_AllSites.rds")
+
+# Height measurements included in the dataset:
+heights <- c("MAD_htdec11","CAC_htdec11","BDX_htnov13","BDX_htnov18","POR_htjan12","POR_htmay13","AST_htdec11","AST_htmar14")
+
+data %>% dplyr::select(site, block, prov,clon, tree, heights) %>% 
+  write_csv("data_DRYAD/HeightDataCommonGarden.csv",append = FALSE)
+```
+
 
 ## Mathematical model
 
