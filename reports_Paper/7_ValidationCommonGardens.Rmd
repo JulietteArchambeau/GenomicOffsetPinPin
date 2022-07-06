@@ -1,0 +1,692 @@
+---
+title: "Validating genomic offset predictions in the common gardens"
+author: "Juliette Archambeau"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    # code_fold: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+       collapsed: false
+    number_sections: true
+    highlight: textmate
+bibliography: references.bib
+editor_options: 
+  chunk_output_type: console
+---
+
+<style>
+pre {
+  overflow-x: auto;
+}
+pre code {
+  word-wrap: normal;
+  white-space: pre;
+}
+</style>
+
+<style type="text/css">
+div.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+
+```{css, echo=FALSE}
+pre {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 600px;
+}
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 5,fig.height = 4,cache=FALSE)
+options(width = 300)
+library(knitr)
+library(tidybayes)
+library(rstan)
+library(brms)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+library(bayesplot)
+color_scheme_set("green")
+library(reshape2)
+library(dplyr)
+library(tidyverse)
+library(xtable)
+library(latex2exp)
+library(kableExtra)
+```
+
+```{r CredibleIntervalsUsed, echo=F}
+# The credible intervals used are 95% CI.
+prob=0.95
+probs <- c((1 - prob) / 2, 1 - (1 - prob) / 2)
+prob_outer = 1
+```
+
+
+# Load CTD and genomic offset
+
+```{r ExtractGOandCTD}
+df <- lapply(c("GDM","GF"), function(x){
+  
+  df <- list.files(paste0("outputs_paper/",x,"/ExtractedGenomicOffsetCG/"), full.names=TRUE) %>% 
+    sapply(readRDS, USE.NAMES = TRUE,simplify=FALSE)
+  names(df) <- str_sub(names(df),-7,-5)
+  df <- df %>% 
+    bind_rows(.id="SNPSets") %>% 
+    mutate(Model=x)
+  
+}) %>% 
+  bind_rows() %>% 
+  mutate(CTD.bio1=s1.bio1-s2.bio1,
+         CTD.bio5=s1.bio5-s2.bio5,
+         CTD.bio6=s1.bio6-s2.bio6,
+         CTD.bio12=s1.bio12-s2.bio12,
+         CTD.bio15=s1.bio15-s2.bio15) %>% 
+  pivot_wider(names_from=SNPSets,values_from = GO,names_prefix="GO.") %>% 
+  pivot_wider(names_from=Model,values_from = c(GO.Ref,GO.Mer,GO.Com),names_sep = ".") %>% 
+  dplyr::select(-contains(c("s1.bio","s2.bio","depth","water","TRI","Burned","s1.x","s1.y"))) %>% 
+  dplyr::rename(site=s2.site,
+                prov=s1.prov)
+
+df %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1:2, bold = T)
+```
+
+
+
+# Mortality models
+
+In this section, we want to determine whether **genomic offset (GO)** or **climate transfer distances (CTD)** are associated with the **proportion of dead trees in the populations**, independantly in two common gardens located in Spain (next to Madrid and Cáceres, respectively) and in which mortality rates were high. For that, we build a model that assumes that **tree height acts as a confounder**. Indeed, trees that were higher at the time of planting have a higher probability of survival. This is particularly true in Madrid and Cáceres where there were an extreme drought event the same year the trees were planted. Here is the model:
+  
+\begin{align*} 
+a_{p} &\sim \text{Binomial} (N_{p},p_{p}) \\
+\text{logit}(p_{p}) &= \beta_{0} +  \beta_{H}H_{p} + \beta_{X1}X_{p}\\
+\end{align*}
+
+
+with $a_{p}$ the count of individual that died in the population $p$, $N_{p}$ the total number of individuals in the population $p$ (=number of individuals that were initially planted in the common garden), $p_p$ is the estimated probability of mortality in the population $p$, $X_{p}$ is the genomic offset or climatic transfer distance for the population $p$ and $H_{p}$ is the BLUPs for height of the population $p$ (population varying intercepts calculated across all common gardens in the model 1 of \cite{archambeauCombiningClimaticGenomic2021}). We included $H_{p}$ as a covariate in the model to account for height differences before planting, as smaller trees had a higher mortality probability than taller trees. We used the following weakly informative priors:
+
+  
+\begin{align*} 
+\begin{bmatrix}  \beta_{0,c} \\ \beta_{H} \\ \beta_{X_1} \end{bmatrix} &\sim \mathcal{N}(0,5)
+\end{align*}
+
+
+
+## Load the data
+
+### Height data (confounder)
+
+We use here the provenance intercepts obtained in the model 1 of the first paper. 
+
+```{r ExtractHeightInterceptsPaper1Model1,message=F,warning=F}
+HierMod <- readRDS(file="../../Pinpin_Clonapin/HeightPinpinClonapin/outputs/models/P1/MOD1.rds")
+heights <- HierMod %>% 
+  broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>% # we take the mean of the prov random intercepts
+  filter(str_detect(term, "^(r_prov\\[)")) %>% 
+  dplyr::rename(height=estimate,prov=term) %>% 
+  mutate(prov=str_sub(prov,8,-12))
+
+heights %>% 
+  knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>%
+  column_spec(1, bold = T)
+```
+
+### Mortality data (response variable)
+
+```{r LoadSurvData}
+data <- read.csv("data_DRYAD/SurvivalDataCommonGarden.csv")
+```
+
+
+## Run the models
+
+```{r CompileMortalityModel, cache=T,message=F,warning=F}
+stancode = stan_model("scripts/StanModels/BinomialMortalityModelCG.stan")
+print(stancode)
+```
+
+
+```{r RunMortalityModels, eval=F}
+DF <- sapply(c("caceres","madrid"),function(sel.site){
+  
+vars <- colnames(df)[str_detect(colnames(df),"CTD|GO")]
+
+counter <- 0
+
+subdata <- data %>% 
+  filter(site==sel.site) %>% 
+  dplyr::select(prov,survival) %>% 
+  drop_na() %>% 
+  group_by(prov) %>% 
+  dplyr::summarise(dead.count=n()-sum(survival),tot.count=n())
+
+subdf <- df %>% 
+  filter(site==sel.site) %>% 
+  inner_join(heights[,c("prov","height")], by="prov") %>% 
+  inner_join(subdata, by="prov")
+
+DFint <- sapply(vars,function(x){
+
+  counter <<- counter + 1 
+  
+  X <- subdf[,x] %>% pull()
+
+  stanlist <- list(N=length(subdf$prov),
+                   NbDead=subdf$dead.count,
+                   NbTot=subdf$tot.count,
+                   H=(subdf$height-mean(subdf$height))/sd(subdf$height),
+                   X=(X -mean(X))/sd(X))
+
+  # Running the model
+  mstan <- sampling(stancode, data = stanlist, iter = 2000, chains = 4, cores = 4) 
+
+  loo.mstan <- loo(mstan)
+  saveRDS(loo.mstan,file=paste0("outputs_paper/ValidationCG/MortalityModels/LOOs/loo_",vars[[counter]],"_",sel.site,".rds"))
+  
+  
+  # Save coefficients
+  broom::tidyMCMC(mstan,
+                  droppars = NULL, 
+                  estimate.method = "median", 
+                  ess = F, 
+                  rhat = F, 
+                  conf.int = T,
+                  conf.level = prob) %>% 
+  filter(str_detect(term, c('beta')))
+
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="variable")
+  
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="site")
+
+saveRDS(DF,file="outputs_paper/ValidationCG/MortalityModels/TableCoeffMortalityModels.rds")
+```
+
+```{r LookTablePosteriorsMortalityModels}
+DF <- readRDS(file="outputs_paper/ValidationCG/MortalityModels/TableCoeffMortalityModels.rds")
+DF %>% 
+  print(n=Inf) %>%
+  knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F)
+```
+
+## Visualization
+
+```{r SummaryFigsMortalityModels}
+index.match <- list(betaH=c("betaH","Height effect ($\\beta_{H}$ estimate)"),
+                    betaX1=c("betaX1","Regression coefficients"))
+
+lapply(c("betaX1","betaH"),function(index){
+
+labels <- c("Common SNP candidates",
+            "Merged SNP candidates",
+            "Reference SNPs",
+            "Annual mean temperature",
+            "Maximum temperature of the warmest month",
+            "Minimum temperature of the coldest month",
+            "Annual precipitation",
+            "Precipitation seasonality")
+
+p <- readRDS(file=paste0("outputs_paper/ValidationCG/MortalityModels/TableCoeffMortalityModels.rds")) %>% 
+  filter(term==index) %>% 
+  mutate(Method=case_when(str_detect(variable,"CTD")==TRUE~"Climatic transfer distance",
+                          str_detect(variable,"GDM")==TRUE~"Genomic offset",
+                          str_detect(variable,"GF")==TRUE~"Genomic offset"),
+         Method.GO=case_when(str_detect(variable,"CTD")==TRUE~"CTD",
+                             str_detect(variable,"GDM")==TRUE~"GDM",
+                          str_detect(variable,"GF")==TRUE~"GF"),
+         Variable=case_when(str_detect(variable,"CTD")==TRUE~str_sub(variable,5,-1),
+                            str_detect(variable,"GO")==TRUE~str_sub(variable,4,6)),
+         Method.GO=factor(Method.GO,levels=c("GDM","GF","CTD")),
+         Variable=factor(Variable,levels=c("Com","Mer","Ref",paste0("bio",c(1,5,6,12,15)))),
+         site=case_when(site=="caceres"~"Cáceres",
+                        site=="madrid"~"Madrid")) %>% 
+  
+  ggplot(aes(x = Variable, y = estimate,ymin = conf.low, ymax = conf.high,color=Variable,shape=Variable)) +#
+  geom_hline(yintercept = 0,color="gray") +
+  geom_pointinterval(position = position_dodge(width = .2),point_size=3.5,size=3) + # 
+  facet_grid(site~Method.GO,scales="free_x", space = "free") + 
+  ylab(TeX(index.match[[index]][[2]])) + xlab("") +
+  scale_color_manual(values=c("forestgreen","chartreuse2","gold1","navy","royalblue3","steelblue2","mediumpurple1","darkorchid1"),labels=labels) +
+  scale_shape_manual(values = c(16,17,8,15, 15, 15, 15, 15),labels=labels) +
+  theme_bw() +
+  labs(color="",shape="") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y = element_text(size=13),
+        axis.title.y = element_text(size=16),
+        axis.title.x = element_text(size=1),
+      legend.title=element_text(size=13), 
+      legend.text=element_text(size=12),
+      legend.position = "bottom",
+      #legend.background = element_rect(colour = "grey"),
+      strip.text.x = element_text(size = 16),
+      strip.text.y = element_text(size=16,angle = 0),
+      strip.background = element_blank(),
+      panel.grid.minor.x=element_blank(),
+      panel.grid.major.x=element_blank()) +
+    guides(color=guide_legend(ncol=2),
+           shape = guide_legend(override.aes = list(size =2 )))
+ 
+ 
+# for latex
+ggsave(p,file=paste0("outputs_paper/ValidationCG/MortalityModels/Figs/",index.match[[index]][[1]],"_AllSets.pdf"),
+       device="pdf",
+       height=9,
+       width=10)
+
+# for google docs
+ggsave(p,file=paste0("outputs_paper/ValidationCG/MortalityModels/Figs/",index.match[[index]][[1]],"_AllSets.png"),
+       height=9,
+       width=10)
+})
+```
+
+Important points:
+
+  - CTD predictions more robust/consistent than genomic offset predictions. => more reliable?
+  
+  - Reference SNPs better than candidate SNPs (both merged and common) => influence of the population genetic structure? In maritime pine, trait variation is highly associated with the population genetic structure..
+  
+  - Surprisingly, the best CTD is the minimum temperature of the coldest month, so we may expect that common candidate SNPs which were almost all associated with this climatic variable would also capture the mortality variation, but this is not the case.
+  
+  
+
+## Leave-one out cross validation
+
+```{r LooMortalityModels}
+lapply(c("caceres","madrid"),function(sel.site){
+  
+d <- list.files(paste0("outputs_paper/ValidationCG/MortalityModels/LOOs"),full.names=TRUE) %>% 
+  str_subset(sel.site) %>% 
+  sapply(readRDS, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  loo_compare() %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var ="variable") %>% 
+  as_tibble() %>% 
+  mutate(site=sel.site,
+         variable=str_sub(variable,52,-12),
+         ModellingApproach=case_when(str_detect(variable,"GF")~"GF-based genomic offset",
+                                     str_detect(variable,"GDM")~"GDM-based genomic offset",
+                                     str_detect(variable,"CTD")~"Climatic transfer distance"),
+         Covariate=case_when(str_detect(variable,"Mer")~"Merged candidates",
+                             str_detect(variable,"Com")~"Common candidates",
+                             str_detect(variable,"Ref")~"Reference candidates",
+                             str_detect(variable,"bio5")~"bio5 - Maximum temperature of the warmest month (°C)",
+                             str_detect(variable,"bio6")~"bio6 - Minimum temperature of the coldest month (°C)",
+                             str_detect(variable,"bio12")~"bio12 - Annual precipitation (mm)",
+                             str_detect(variable,"bio15")~"bio15 - Precipitation seasonality (coefficient of variation)",
+                             str_detect(variable,"bio1")~"bio1 - Annual mean temperature (°C)")) %>% 
+    dplyr::select(ModellingApproach,Covariate,elpd_diff,se_diff)
+
+print(xtable(d,type = "latex",digits=2), 
+      file = paste0("tables_paper/ValidationCG_MortalityModelsLOOs_",sel.site,".tex"), 
+      include.rownames=FALSE)
+
+d
+  
+})
+```
+
+**How to interpret the outputs from `loo_compare` function?**
+
+- [How to use cross-validation for model selection? in the Cross-validation FAQ of Aki Vehtari](https://avehtari.github.io/modelselection/CV-FAQ.html#how-to-use-cross-validation-for-model-selection)
+
+
+"If there is no application specific utility or loss function, use log score, i.e. elpd. **If elpd difference** (`elpd_diff` in `loo` package) **is less than 4, the difference is small**. If elpd difference is larger than 4, then compare that difference to standard error of `elpd_diff` (provided e.g. by `loo` package)."
+
+- [Interpreting output from compare() of loo](https://discourse.mc-stan.org/t/interpreting-output-from-compare-of-loo/3380/2)
+
+
+"it’s better to consider something like 2SE or more cautious 4SE, where 4 comes from the fact that SE for LOO can be underestimated for small n or under bad model misspecification.""
+
+## Experimental design
+
+We generate a latex table for the Supplementary Information.
+
+```{r ExpDesignMortalityModels}
+ExpDesignTab <- sapply(c("caceres","madrid"),function(sel.site){
+  
+read.csv("data_DRYAD/SurvivalDataCommonGarden.csv") %>% 
+  filter(site==sel.site) %>% 
+  dplyr::select(prov,survival) %>% 
+  drop_na() %>% 
+  group_by(prov) %>% 
+  dplyr::summarise(dead.count=n()-sum(survival),tot.count=n()) %>% 
+    mutate(prop.dead=dead.count*100/tot.count)
+  
+}, USE.NAMES = TRUE,simplify=FALSE ) %>% 
+  bind_rows(.id="site") %>% 
+  pivot_wider(names_from=site,values_from = c(dead.count, tot.count,prop.dead),names_sep="_") %>% 
+  dplyr::select(prov,contains("caceres"),contains("madrid"))
+
+# Generate the latex table
+print(xtable(ExpDesignTab, type = "latex",digits=2), 
+      file = paste0("tables_paper/ExperimentalDesignTablesSurvivalCommonGarden.tex"), 
+      include.rownames=FALSE)
+
+# Information used in the manuscript
+ExpDesignTab[,-1] %>% 
+  dplyr::summarise_all(mean) %>% 
+  knitr::kable(digits = 2) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F)
+```
+
+
+
+# Height models
+
+## Mathematical model
+
+In this section, we want to determine whether **genomic offset (GO)** or **climate transfer distances (CTD)** are associated with the **mean height of the populations**, independantly in five common gardens located in Spain (Asturias, Madrid, Cáceres), Portugal (near Fundao) and France (Pierroton). In each common garden $s$, we perfom the following model:
+  
+\begin{align*} 
+H_{p}  &\sim \mathcal{N}(\mu_{p},\sigma^{2}_{r}) \\
+\mu_{p} &= \beta_{0} + \beta_{X1}X_{p} + \beta_{X2}X^{2}_{p} \\
+\end{align*}
+
+with $H_{p}$ the BLUPs for height of the population $p$ in the site $s$ (calculated with site-specific models in which the effects of blocks and the genetic population structure were accounted for, see script `EstimatingBLUPsForHeight.R`) and $X_{p}$ is the value of the variable of interest (GO or CTD) in the population $p$. We include a quadratic term for $X_p$ to allow for potential nonlinearity in the response, following @fitzpatrick2021experimental.
+
+<!-- First version: The BLUPs were calculated with the model 2 of [Archambeau et al. 2021](https://www.biorxiv.org/content/10.1101/2020.11.13.382515v1.abstract), which accounts for the population-by-site interaction -->
+
+
+```{r CompileHeightModel, cache=T,message=F,warning=F}
+stancode = stan_model("scripts/StanModels/GaussianModelHeightCG.stan")
+print(stancode)
+```
+
+## Running the models
+
+```{r LoadHeightData}
+data <- read.csv("data_DRYAD/HeightDataCommonGarden.csv")
+```
+
+```{r FunctionVizLinearAsso}
+# Function to visualize the linear association between BLUPs for height and variable of interest (GO or CTD)
+plot_predictions <- function(mod,stanlist) {
+  pred <- mod %>% 
+    spread_draws(mu[i], muhat[i]) %>%
+    mean_qi %>%
+    mutate(X = stanlist$X,
+           H = stanlist$H) %>%
+    arrange(X)
+  ggplot(pred) +
+    geom_ribbon(aes(X, ymin = muhat.lower, ymax = muhat.upper), alpha = .1) +
+    geom_ribbon(aes(X, ymin = mu.lower, ymax = mu.upper), alpha = .2, fill = 'red') +
+    geom_line(aes(X, mu)) +
+    geom_point(aes(X, H), shape = 1, color = 'dodgerblue4', alpha = 1) +
+    ylab('BLUPs for height') + 
+    xlab(TeX("Mean-centered $X_p$")) +
+    theme_bw() + 
+    theme(axis.text.x = element_text(size=13),
+          axis.text.y = element_text(size=13),
+          axis.title = element_text(size=16))
+}
+```
+
+```{r RunningHeightModels, eval=F}
+# Height measurements used in the present study
+height.m <- c("MAD_htdec11","CAC_htdec11","BDX_htnov13","BDX_htnov18","POR_htjan12","POR_htmay13","AST_htdec11","AST_htmar14")
+
+# matching between height measurements and the common garden in which they were taken
+match.site <- list(MAD_htdec11="madrid",
+              CAC_htdec11="caceres",
+              BDX_htnov13="bordeaux",
+              BDX_htnov18="bordeaux",
+              POR_htjan12="portugal",
+              POR_htmay13="portugal",
+              AST_htdec11="asturias",
+              AST_htmar14="asturias")
+
+
+# Function to run the models for each height measurement
+DF <- sapply(height.m,function(sel.height.m){
+  
+# Subsetting the data: keeping only the height measurement of interest 
+subdata <- data %>%
+  dplyr::select(prov,block,all_of(sel.height.m)) %>% 
+  dplyr::rename(height=all_of(sel.height.m)) %>% 
+  drop_na() %>% 
+  mutate(height=(height-mean(height))/sd(height)) #  ! height is centered !
+
+# Specify the priors
+priors <- c(prior(normal(0, 10), class = Intercept),
+            prior(cauchy(0, 10), class = sd),
+            prior(cauchy(0, 10), class = sigma))
+
+# Running the models to estimate the BLUPs for height of each population
+mod <- brm(height  ~  (1|prov) +  (1|block) ,
+           
+           prior = priors,
+           
+           data = subdata, 
+           family = "gaussian",
+           chain=4,
+           iter=2500)
+
+# Extract the BLUPs (mean intercept of each population)
+intercepts  <- mod %>% 
+  broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>%   # we take the mean of the prov random intercepts
+  filter(str_detect(term, "^(r_prov\\[)")) %>% 
+  mutate(prov=str_sub(term,8,-12)) %>% 
+  dplyr::select(prov,estimate)
+  
+vars <- colnames(df)[str_detect(colnames(df),"CTD|GO")]
+
+# Merge the mean population intercepts with the variables of interest (CTD and GO)
+subdf <- df %>% 
+    filter(site==match.site[[sel.height.m]]) %>% 
+    inner_join(intercepts, by="prov")
+  
+counter <- 0
+
+DFint <- sapply(vars,function(x){
+
+  counter <<- counter + 1 
+  
+  X <- subdf[,x] %>% pull()
+  
+  # List for Stan
+  stanlist <- list(N=length(subdf$prov),
+                   H=subdf$estimate,
+                   X=(X -mean(X))/sd(X))
+
+  # Running the model with rstan
+  mstan <- sampling(stancode, data = stanlist, iter = 2000, chains = 4, cores = 4) 
+  
+  
+  # Visualization linear association:
+  ggsave(plot_predictions(mod=mstan,stanlist=stanlist),
+         file = paste0("outputs_paper/ValidationCG/HeightModels/Figs/PlotPredictedLinearAssociation/",vars[[counter]],"_",sel.height.m,".pdf"),
+         height = 6,width=8,
+         device="pdf")
+  
+  # Calculating  the LOO to compare the models
+  loo.mstan <- loo(mstan)
+  saveRDS(loo.mstan,file=paste0("outputs_paper/ValidationCG/HeightModels/LOOs/loo_",vars[[counter]],"_",sel.height.m,".rds"))
+  
+  # Save the coefficients in a table
+  d <- broom::tidyMCMC(mstan,
+                  droppars = NULL, 
+                  estimate.method = "median", 
+                  ess = F, 
+                  rhat = F, 
+                  conf.int = T,
+                  conf.level = prob) %>% 
+  filter(str_detect(term, c('R_squared|beta')))
+  
+  rm(mstan)
+  
+  d
+
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="variable")
+  
+}, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  
+  bind_rows(.id="height.m")
+
+saveRDS(DF,file="outputs_paper/ValidationCG/PosteriorsHeightModels.rds")
+```
+
+
+```{r LookTablePosteriorsHeightModels, eval=F}
+DF <- readRDS(file="outputs_paper/ValidationCG/PosteriorsHeightModels.rds")
+
+DF %>% 
+  filter(term=="betaX1"|term=="betaX2") %>% 
+  print(n=Inf) %>%
+  knitr::kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F)
+
+DF %>% 
+  filter(term=="R_squared") %>% 
+  print(n=Inf) 
+
+DF %>% 
+  filter(term=="betaX1") %>% 
+  print(n=Inf)
+
+```
+
+## Visualization
+
+```{r SummaryFigsHeightModels,fig.height=12,fig.width=12}
+index.match <- list(R_squared=c("R2","Goodness of fit ($R^{2}$ estimate)"),
+                    betaX1=c("betaX1","Regression coefficients"))
+
+lapply(c("betaX1","R_squared"),function(index){
+
+pdf <- readRDS(file="outputs_paper/ValidationCG/PosteriorsHeightModels.rds") %>% 
+  filter(term==index) %>% 
+  mutate(Method=case_when(str_detect(variable,"CTD")==TRUE~"Climatic transfer distance",
+                          str_detect(variable,"GDM")==TRUE~"Genomic offset",
+                          str_detect(variable,"GF")==TRUE~"Genomic offset"),
+         Method.GO=case_when(str_detect(variable,"CTD")==TRUE~"CTD",
+                             str_detect(variable,"GDM")==TRUE~"GDM",
+                          str_detect(variable,"GF")==TRUE~"GF"),
+         Method.GO=factor(Method.GO,levels=c("GDM","GF","CTD")),
+         Variable=case_when(str_detect(variable,"CTD")==TRUE~str_sub(variable,5,-1),
+                            str_detect(variable,"GO")==TRUE~str_sub(variable,4,6)),
+         Variable=factor(Variable,levels=c("Com","Mer","Ref",paste0("bio",c(1,5,6,12,15)))),
+         Site.labels=case_when(str_detect(height.m,"MAD")~"Madrid",
+                               str_detect(height.m,"CAC")~"Cáceres",
+                               str_detect(height.m,"BDX")~"Bordeaux",
+                               str_detect(height.m,"POR")~"Portugal",
+                               str_detect(height.m,"AST")~"Asturias"),
+         Age=case_when(height.m=="MAD_htdec11"~ "(13 months)",
+                       height.m=="CAC_htdec11"~ "(8 months)",
+                       height.m=="BDX_htnov13"~ "(25 months)",
+                       height.m=="BDX_htnov18"~ "(85 months)",
+                       height.m=="POR_htjan12"~ "(11 months old)",
+                       height.m=="POR_htmay13"~ "(27 months old)",
+                       height.m=="AST_htdec11"~ "(10 months old)",
+                       height.m=="AST_htmar14"~ "(37 months old)"),
+         
+         Site.Age.labels=case_when(height.m=="MAD_htdec11"~ "Madrid (13 months)",
+                                   height.m=="CAC_htdec11"~ "Cáceres (8 months)",
+                                   height.m=="BDX_htnov13"~ "Bordeaux (25 months)",
+                                   height.m=="BDX_htnov18"~ "Bordeaux (85 months)",
+                                   height.m=="POR_htjan12"~ "Portugal (11 months old)",
+                                   height.m=="POR_htmay13"~ "Portugal (27 months old)",
+                                   height.m=="AST_htdec11"~ "Asturias (10 months old)",
+                                   height.m=="AST_htmar14"~ "Asturias (37 months old)")) 
+
+# All combinations site/age: 
+p <- pdf %>% 
+  ggplot(aes(x = Variable, y = estimate,ymin = conf.low, ymax = conf.high,colour=Variable,shape=Variable)) +#
+  geom_hline(yintercept = 0,color="gray") +
+  geom_pointinterval(position = position_dodge(width = .4),point_size=3,size=2,show.legend = c(size = TRUE)) +
+  facet_grid(Site.Age.labels~Method.GO,scales="free_x", space = "free") + 
+  ylab(TeX(index.match[[index]][[2]])) + xlab("") +
+  scale_color_manual(values=c("forestgreen","chartreuse2","gold1","navy","royalblue3","steelblue2","mediumpurple1","darkorchid1"),labels=labels) +
+  scale_shape_manual(values = c(16,17,8,15, 15, 15, 15, 15),labels=labels) +
+  theme_bw() +
+  labs(color="",shape="") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y = element_text(size=13),
+        axis.title.y = element_text(size=16),
+        axis.title.x = element_text(size=1),
+      legend.title=element_text(size=13), 
+      legend.text=element_text(size=12),
+      legend.position = "bottom",
+      strip.text.x = element_text(size = 14),
+      strip.text.y = element_text(size=12,angle = 0),
+      panel.grid.minor.x=element_blank(),
+      panel.grid.major.x=element_blank(),
+      strip.background = element_blank()) +
+    guides(color=guide_legend(ncol=2))
+
+
+ggsave(p,
+       file=paste0("outputs_paper/ValidationCG/HeightModels/Figs/",index.match[[index]][[1]],".pdf"),
+       device="pdf",
+       width=9,
+       height=15)
+
+})
+
+```
+
+## Leave-one-out cross validation
+
+
+```{r LooHeightModels}
+sites <- c("MAD_htdec11","CAC_htdec11","BDX_htnov13","BDX_htnov18","POR_htjan12","POR_htmay13","AST_htdec11","AST_htmar14")
+
+sapply(sites,function(sel.site){
+  
+d <- list.files(paste0("outputs_paper/ValidationCG/HeightModels/LOOs"),full.names=TRUE) %>% 
+  str_subset(sel.site) %>% 
+  sapply(readRDS, USE.NAMES = TRUE,simplify=FALSE) %>% 
+  loo_compare() %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var ="variable") %>% 
+  as_tibble() %>% 
+  mutate(site=sel.site,
+         variable=str_sub(variable,49,-17),
+         ModellingApproach=case_when(str_detect(variable,"GF")~"GF-based genomic offset",
+                                     str_detect(variable,"GDM")~"GDM-based genomic offset",
+                                     str_detect(variable,"CTD")~"Climatic transfer distance"),
+         Covariate=case_when(str_detect(variable,"Mer")~"Merged candidates",
+                             str_detect(variable,"Com")~"Common candidates",
+                             str_detect(variable,"Ref")~"Reference candidates",
+                             str_detect(variable,"bio5")~"bio5 - Max T° of the warmest month (°C)",
+                             str_detect(variable,"bio6")~"bio6 - Min T° of the coldest month (°C)",
+                             str_detect(variable,"bio12")~"bio12 - Annual precipitation (mm)",
+                             str_detect(variable,"bio15")~"bio15 - Precipitation seasonality (coeff of variation)",
+                             str_detect(variable,"bio1")~"bio1 - Annual daily mean T° (°C)")) %>% 
+    dplyr::select(ModellingApproach,Covariate,elpd_diff,se_diff)
+
+print(xtable(d,type = "latex",digits=2), 
+      file = paste0("tables_paper/ValidationCG_HeightModelsLOOs_",sel.site,".tex"), 
+      include.rownames=FALSE)
+
+d
+  
+}, USE.NAMES = TRUE,simplify=FALSE)
+```
+
+
+# References
+
