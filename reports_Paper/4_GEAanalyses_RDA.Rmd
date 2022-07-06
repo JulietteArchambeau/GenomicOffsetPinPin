@@ -99,31 +99,6 @@ Climatic variables from WordClim (average for the years 1970-2000):
 
 ```{r SelectedEnvVariables}
 # Names  of the environmental variables of interest in the dataset:
-select.var <- c("bio5WC_prov",
-                "bio6WC_prov",
-                "bio12WC_prov",
-                "bio15WC_prov",
-                "water_top_prov",
-                "depth_roots_prov",
-                "TRI",
-                "BurnedArea")
-```
-
-
-```{r LoadEnvPopStructureData}
-env <- read.csv("data_DRYAD/PhenoEnvPopStructureDataset.csv") %>% 
-  dplyr::select(prov,clon,all_of(select.var),contains("Q")) %>% 
-  dplyr::rename(bio5="bio5WC_prov",
-                bio6="bio6WC_prov",
-                bio12="bio12WC_prov",
-                bio15="bio15WC_prov",
-                water_top="water_top_prov",
-                depth_roots="depth_roots_prov") %>% 
-  filter(clon %in% rownames(gen.imp)) %>% # keep the same clones as in the genomic data
-  unique() %>% 
-  arrange(clon) # the clones have to be in the same order as in the genomic data.. 
-
-# Names of the variables we are going to use in the document
 select.var <- c("bio5",
                 "bio6",
                 "bio12",
@@ -132,6 +107,15 @@ select.var <- c("bio5",
                 "depth_roots",
                 "TRI",
                 "BurnedArea")
+```
+
+
+```{r LoadEnvPopStructureData}
+env <- read.csv("data_DRYAD/PopulationPopStructureEnvData.csv") %>% 
+  dplyr::select(prov,clon,all_of(select.var),contains("Q")) %>%  
+  filter(clon %in% rownames(gen.imp)) %>% # keep the same clones as in the genomic data
+  unique() %>% 
+  arrange(clon) # the clones have to be in the same order as in the genomic data.. 
 
 # Number of environmental covariates:
 nvar <- length(select.var)
@@ -537,30 +521,6 @@ We are going to run:
 
 ```{r LoadEnvGeoPopStructureDataVarPart}
 # Names  of the environmental variables of interest in the dataset:
-select.var <- c("bio5WC_prov",
-                "bio6WC_prov",
-                "bio12WC_prov",
-                "bio15WC_prov",
-                "water_top_prov",
-                "depth_roots_prov",
-                "TRI",
-                "BurnedArea")
-
-env <- read.csv("data_DRYAD/PhenoEnvPopStructureDataset.csv")%>% 
-  dplyr::select(prov,clon,latitude_prov,longitude_prov,all_of(select.var),contains("Q")) %>% 
-  dplyr::rename(latitude="latitude_prov",
-                longitude="longitude_prov",
-                bio5="bio5WC_prov",
-                bio6="bio6WC_prov",
-                bio12="bio12WC_prov",
-                bio15="bio15WC_prov",
-                water_top="water_top_prov",
-                depth_roots="depth_roots_prov") %>% 
-  filter(clon %in% rownames(gen.imp)) %>% # keep the same clones as in the genomic data
-  unique() %>% 
-  arrange(clon) # the clones have to be in the same order as in the genomic data.. 
-
-# Names of the variables we are going to use in the document
 select.var <- c("bio5",
                 "bio6",
                 "bio12",
@@ -569,6 +529,12 @@ select.var <- c("bio5",
                 "depth_roots",
                 "TRI",
                 "BurnedArea")
+
+env <- read.csv("data_DRYAD/PopulationPopStructureEnvData.csv") %>% 
+  dplyr::select(prov,clon,latitude,longitude,all_of(select.var),contains("Q")) %>% 
+  filter(clon %in% rownames(gen.imp)) %>% # keep the same clones as in the genomic data
+  unique() %>% 
+  arrange(clon) # the clones have to be in the same order as in the genomic data.. 
 ```
 
 

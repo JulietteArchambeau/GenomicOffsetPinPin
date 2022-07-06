@@ -109,33 +109,26 @@ In this document, we first visualize the **correlations among the selected envir
   
 ```{r CorrelationsPanels,fig.height=9,fig.width=12}
 # We load the dataset with the extracted environmental variables:
-data <- read.csv("data_DRYAD/PhenoEnvPopStructureDataset.csv")
+data <- read.csv("data_DRYAD/PopulationPopStructureEnvData.csv")
 
-select.var <- c("bio5WC_prov",
-                "bio6WC_prov",
-                "bio12WC_prov",
-                "bio15WC_prov",
-                "water_top_prov",
-                "depth_roots_prov",
+select.var <- c("bio5",
+                "bio6",
+                "bio12",
+                "bio15",
+                "water_top",
+                "depth_roots",
                 "TRI",
                 "BurnedArea")
 
 data %>% 
   dplyr::select(all_of(select.var)) %>% 
   unique() %>% 
-  dplyr::rename(bio5="bio5WC_prov",
-                bio6="bio6WC_prov",
-                bio12="bio12WC_prov",
-                bio15="bio15WC_prov",
-                water_top="water_top_prov",
-                depth_roots="depth_roots_prov") %>% 
   pairs.panels(scale=T,hist.col="palegreen1")
 ```
 
 ```{r PlotCorr,fig.height=7.3,fig.width=7.3}
 source("scripts/Functions/corpmat.R")
 col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
-
 
 PlotCors <- function(data,select.var,nbsize){
   cor <- cor(data[,select.var])
@@ -162,12 +155,6 @@ ggbiplot(pca,varname.size =4) +  ylim(-2.5, 2.5) +    xlim(-3, 3) +
 data %>% 
   dplyr::select(all_of(select.var)) %>% 
   unique() %>% 
-  dplyr::rename(bio5="bio5WC_prov",
-                bio6="bio6WC_prov",
-                bio12="bio12WC_prov",
-                bio15="bio15WC_prov",
-                water_top="water_top_prov",
-                depth_roots="depth_roots_prov") %>% 
   PlotCors(select.var = colnames(.),nbsize = 0.6)
 ```
 

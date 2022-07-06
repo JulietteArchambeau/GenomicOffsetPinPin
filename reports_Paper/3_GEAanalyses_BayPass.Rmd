@@ -184,31 +184,6 @@ Climatic variables from WordClim (average for the years 1970-2000):
 
 ```{r SelectedEnvVariables}
 # Names  of the environmental variables of interest in the dataset:
-select.var <- c("bio5WC_prov",
-                "bio6WC_prov",
-                "bio12WC_prov",
-                "bio15WC_prov",
-                "water_top_prov",
-                "depth_roots_prov",
-                "TRI",
-                "BurnedArea")
-```
-
-
-```{r LoadEnvPopStructureData}
-env <- read.csv("data_DRYAD/PhenoEnvPopStructureDataset.csv") %>% 
-  dplyr::select(prov,all_of(select.var)) %>% 
-  dplyr::rename(bio5="bio5WC_prov",
-                bio6="bio6WC_prov",
-                bio12="bio12WC_prov",
-                bio15="bio15WC_prov",
-                water_top="water_top_prov",
-                depth_roots="depth_roots_prov") %>% 
-  unique()
-
-identical(env$prov, df$prov) # provenances are in the same order as in the genomic data
-
-# Names of the variables we are going to use in the document
 select.var <- c("bio5",
                 "bio6",
                 "bio12",
@@ -217,6 +192,15 @@ select.var <- c("bio5",
                 "depth_roots",
                 "TRI",
                 "BurnedArea")
+```
+
+
+```{r LoadEnvPopStructureData}
+env <- read.csv("data_DRYAD/PopulationPopStructureEnvData.csv") %>% 
+  dplyr::select(prov,all_of(select.var)) %>% 
+  unique()
+
+identical(env$prov, df$prov) # provenances are in the same order as in the genomic data
 
 env <- env %>% dplyr::select(-prov) %>%  t() %>% round(3)
 
