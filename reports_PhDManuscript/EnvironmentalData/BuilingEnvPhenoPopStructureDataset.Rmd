@@ -152,17 +152,28 @@ data %>% dplyr::select(colnames(BurnedArea)) %>%
 
 Great, no missing data.
 
-## Saving the dataset
+## Saving the PhD manuscript dataset
 
+As we updated and corrected 
 
-```{r SavingDataset}
+```{r SavingPhDDataset}
 # saveRDS(data,"data/PhenoEnvPopStructureDataset.RDS")
-
-# We save the dataset for the DRYAD repository
-data %>% dplyr::select(-metap, -region ,-clon_original, -clones522, -block_original, -bb, -dbb, -d13C, -SLA) %>% 
-  write_csv("data_DRYAD/PhenoEnvPopStructureDataset.csv", append=FALSE)
 ```
 
+#  Building the DRYAD dataset
+
+```{r SavingManuscriptDataset}
+# We save the dataset for the DRYAD repository
+data <- data %>% 
+  dplyr::select(-contains("site"), -block,-tree, -obs, -age, -survival, -height,-metap, -region ,-clon_original, -clones522, -block_original, -bb, -dbb, -d13C, -SLA) %>% 
+  rename_with(~str_remove(., '_prov')) %>%
+  rename_with(~str_remove(., 'WC')) %>%
+  unique()
+
+sapply(data,function(x) sum(is.na(x)))
+
+write_csv(data, "data_DRYAD/PopulationPopStructureEnvData.csv", append=FALSE)
+```
 
 # Selected environmnental variables
 
