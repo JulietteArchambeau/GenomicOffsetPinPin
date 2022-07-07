@@ -129,7 +129,8 @@ Variables we are interested in:
   - The number of years between surveys: `NbYears`  (previously `yearsbetweensurveys` in Alexandre's dataset).
   - The basal area of all tree species in the plot (proxy of the competition among trees): `BasalArea` (previously `BA.ha.plot.1` in Alexandre's dataset).
   - The number of years between surveys: `NbYears` (`yearsbetweensurveys` in Alexandre' dataset).
-  - The dates of the first and second survey: `surveydate1` and `surveydate2`.
+  - The dates of the first and second survey in Spain: `surveydate1` and `surveydate2` (with `surveydate`being also the date of the second survey).
+  - The date of the unique survey in France: `surveydate`.
 
 ```{r FormatData,message=F,warning=F}
 data <- data %>% 
@@ -182,6 +183,11 @@ data <- data[!is.na(data$BasalArea),] # removing plots where there is no informa
 
 Now, there are `r dim(data)[[1]]` plots.
 
+```{r SavingDatasetDRYAD}
+# Saving the dataset in the DRYAD repository 
+data %>% dplyr::select(!contains(c("date","PropDead"))) %>% 
+  write_csv("data_DRYAD/NFIdata.csv",append=FALSE)
+```
 
 # Running the models
 
