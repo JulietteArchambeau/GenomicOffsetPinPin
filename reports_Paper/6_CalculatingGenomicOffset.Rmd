@@ -187,10 +187,7 @@ mem %>%
 ### Formatting NFI data
 
 ```{r LoadNFIdata}
-NFIdata <- readRDS(file="data/IFN/alexdata/dfplotPINPINA0.8R.M.rds") %>% 
-  dplyr::select(plotcode,longitude,latitude,treeNbrJ.IMall) %>% 
-  dplyr::rename(NbTot=treeNbrJ.IMall)
-NFIdata <- NFIdata[!(NFIdata$NbTot==0),]
+NFIdata <- read.csv("data_DRYAD/NFIdata.csv")
 ```
 
 ### Formatting common garden data
@@ -398,7 +395,7 @@ dev.off()
 # We use a counter to refer to the different sets of SNPs:
 # set 1 (1st iteration) => reference SNPs
 # set 2 (2nd iteration) => merged candidates
-# set 4 (4th iteration) => common candidates
+# set 3 (3rd iteration) => common candidates
 counter <- 0
 
 GDM.outputs <- lapply(ListPairwiseFstScaled, function(x){
@@ -422,11 +419,6 @@ gdm.mod <- gdm(gdmTab, geo=T)
 
 # Deviance explained 
 perf <- data.frame(ExpDev=gdm.mod$explained)
-
-
-# sum(gdm.mod$coefficients) # https://rdrr.io/cran/gdm/src/R/GDM_Table_Funcs.R
-# if sum = 0: The algorithm was unable to fit a model to your data. The sum of the spline coefficients = 0 and deviance explained = NULL. Returning NULL object.
-
 
 # Cross-validation with 9 folds
 dcv <- sapply(1:100,function(i){
@@ -881,7 +873,7 @@ dev.off()
 ```
 
 
-```{r GFanalyses,eval=T}
+```{r GFanalyses,eval=F}
 counter <- 0 
 # We use a counter to refer to the different sets of SNPs:
 # set 1 (1st iteration) => reference SNPs
