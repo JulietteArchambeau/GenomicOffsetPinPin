@@ -383,6 +383,11 @@ print(xtable(ExpDesignTab, type = "latex",digits=2),
       file = paste0("tables_paper/ExperimentalDesignTablesSurvivalCommonGarden.tex"), 
       include.rownames=FALSE)
 
+ExpDesignTab %>%
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=10,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>% 
+  column_spec(1, bold = T)
+
 # Information used in the manuscript
 ExpDesignTab[,-1] %>% 
   dplyr::summarise_all(mean) %>% 
@@ -403,9 +408,7 @@ H_{p}  &\sim \mathcal{N}(\mu_{p},\sigma^{2}_{r}) \\
 \mu_{p} &= \beta_{0} + \beta_{X1}X_{p} + \beta_{X2}X^{2}_{p} \\
 \end{align*}
 
-with $H_{p}$ the BLUPs for height of the population $p$ in the site $s$ (calculated with site-specific models in which the effects of blocks and the genetic population structure were accounted for, see script `EstimatingBLUPsForHeight.R`) and $X_{p}$ is the value of the variable of interest (GO or CTD) in the population $p$. We include a quadratic term for $X_p$ to allow for potential nonlinearity in the response, following @fitzpatrick2021experimental.
-
-<!-- First version: The BLUPs were calculated with the model 2 of [Archambeau et al. 2021](https://www.biorxiv.org/content/10.1101/2020.11.13.382515v1.abstract), which accounts for the population-by-site interaction -->
+with $H_{p}$ the BLUPs for height of the population $p$ in the site $s$ (calculated with site-specific models in which the effects of blocks and the genetic population structure were accounted for) and $X_{p}$ is the value of the variable of interest (GO or CTD) in the population $p$. We include a quadratic term for $X_p$ to allow for potential nonlinearity in the response, following @fitzpatrick2021experimental.
 
 
 ```{r CompileHeightModel, cache=T,message=F,warning=F}
@@ -442,7 +445,12 @@ plot_predictions <- function(mod,stanlist) {
 }
 ```
 
-```{r RunningHeightModels, eval=F}
+```{r BLUPsCorrectionForPopStructure}
+# Correcting the BLUPs with pop structure?
+PS.correct = TRUE
+```
+
+```{r HeightMeasurements}
 # Height measurements used in the present study
 height.m <- c("MAD_htdec11","CAC_htdec11","BDX_htnov13","BDX_htnov18","POR_htjan12","POR_htmay13","AST_htdec11","AST_htmar14")
 
@@ -455,14 +463,16 @@ match.site <- list(MAD_htdec11="madrid",
               POR_htmay13="portugal",
               AST_htdec11="asturias",
               AST_htmar14="asturias")
+```
 
 
+```{r RunningHeightModels, eval=F}
 # Function to run the models for each height measurement
 DF <- sapply(height.m,function(sel.height.m){
   
 # Subsetting the data: keeping only the height measurement of interest 
 subdata <- data %>%
-  dplyr::select(prov,block,all_of(sel.height.m)) %>% 
+  dplyr::select(prov,block,clon,all_of(sel.height.m)) %>% 
   dplyr::rename(height=all_of(sel.height.m)) %>% 
   drop_na() %>% 
   mutate(height=(height-mean(height))/sd(height)) #  ! height is centered !
@@ -472,7 +482,12 @@ priors <- c(prior(normal(0, 10), class = Intercept),
             prior(cauchy(0, 10), class = sd),
             prior(cauchy(0, 10), class = sigma))
 
+
+
 # Running the models to estimate the BLUPs for height of each population
+# ======================================================================
+
+if(PS.correct==FALSE){
 mod <- brm(height  ~  (1|prov) +  (1|block) ,
            
            prior = priors,
@@ -480,12 +495,47 @@ mod <- brm(height  ~  (1|prov) +  (1|block) ,
            data = subdata, 
            family = "gaussian",
            chain=4,
+           iter=2500)} else{
+             
+PSdata <- read.csv("data_DRYAD/PopulationPopStructureEnvData.csv") %>% 
+  dplyr::select(prov,clon,contains("Q")) %>%  
+  unique() %>% 
+  arrange(clon) 
+
+subdata <- subdata %>% left_join(PSdata,by=c("prov","clon"))
+
+# Population structure
+colnames(subdata)[colnames(subdata) %in% c(paste0("Q",rep(1:6)))] <- c(paste0("prop_Q",rep(1:6)))
+head(subdata[,c(paste0("prop_Q",rep(1:6)))])
+subdata$Q1 <- "Q1"
+subdata$Q2 <- "Q2"
+subdata$Q3 <- "Q3"
+subdata$Q4 <- "Q4"
+subdata$Q5 <- "Q5"
+subdata$Q6 <- "Q6"
+sum(subdata[,c(paste0("prop_Q",rep(1:6)))]<0)
+filter_at(subdata,c(paste0("prop_Q",rep(1:6))),any_vars(. < 0))
+subdata$prop_Q6[subdata$prop_Q6<0] <- 0
+           
+
+mod <- brm(height  ~  (1|prov) + 
+                      (1|block) +
+                      (1|mm(Q1,Q2,Q3,Q4,Q5,Q6, weights = cbind(prop_Q1,prop_Q2,prop_Q3,prop_Q4,prop_Q5,prop_Q6))),
+            
+           prior = priors,
+            
+           data = subdata, 
+           family = "gaussian",
+           #control = list(adapt_delta=0.999,max_treedepth =14),
+           chain=4,
            iter=2500)
+
+}
 
 # Extract the BLUPs (mean intercept of each population)
 intercepts  <- mod %>% 
   broom::tidyMCMC(estimate.method = "mean",conf.int = T) %>%   # we take the mean of the prov random intercepts
-  filter(str_detect(term, "^(r_prov\\[)")) %>% 
+  dplyr::filter(str_detect(term, "^(r_prov\\[)")) %>% 
   mutate(prov=str_sub(term,8,-12)) %>% 
   dplyr::select(prov,estimate)
   
@@ -493,7 +543,7 @@ vars <- colnames(df)[str_detect(colnames(df),"CTD|GO")]
 
 # Merge the mean population intercepts with the variables of interest (CTD and GO)
 subdf <- df %>% 
-    filter(site==match.site[[sel.height.m]]) %>% 
+    dplyr::filter(site==match.site[[sel.height.m]]) %>% 
     inner_join(intercepts, by="prov")
   
 counter <- 0
@@ -512,7 +562,7 @@ DFint <- sapply(vars,function(x){
   # Running the model with rstan
   mstan <- sampling(stancode, data = stanlist, iter = 2000, chains = 4, cores = 4) 
   
-  
+  if(PS.correct==FALSE){ # !! Only performed on models with BLUPs not corrected for the population genetic structure
   # Visualization linear association:
   ggsave(plot_predictions(mod=mstan,stanlist=stanlist),
          file = paste0("outputs_paper/ValidationCG/HeightModels/Figs/PlotPredictedLinearAssociation/",vars[[counter]],"_",sel.height.m,".pdf"),
@@ -521,7 +571,18 @@ DFint <- sapply(vars,function(x){
   
   # Calculating  the LOO to compare the models
   loo.mstan <- loo(mstan)
-  saveRDS(loo.mstan,file=paste0("outputs_paper/ValidationCG/HeightModels/LOOs/loo_",vars[[counter]],"_",sel.height.m,".rds"))
+  saveRDS(loo.mstan,file=paste0("outputs_paper/ValidationCG/HeightModels/LOOs/loo_",vars[[counter]],"_",sel.height.m,".rds"))} else{
+    
+  # Visualization linear association:
+  ggsave(plot_predictions(mod=mstan,stanlist=stanlist),
+         file = paste0("outputs_paper/ValidationCG/HeightModels/Figs/PlotPredictedLinearAssociation/",vars[[counter]],"_",sel.height.m,"_WithPScorrection.pdf"),
+         height = 6,width=8,
+         device="pdf")
+  
+  # Calculating  the LOO to compare the models
+  loo.mstan <- loo(mstan)
+  saveRDS(loo.mstan,file=paste0("outputs_paper/ValidationCG/HeightModels/LOOs/loo_",vars[[counter]],"_",sel.height.m,"_WithPScorrection.rds"))  
+  }
   
   # Save the coefficients in a table
   d <- broom::tidyMCMC(mstan,
@@ -531,7 +592,7 @@ DFint <- sapply(vars,function(x){
                   rhat = F, 
                   conf.int = T,
                   conf.level = prob) %>% 
-  filter(str_detect(term, c('R_squared|beta')))
+  dplyr::filter(str_detect(term, c('R_squared|beta')))
   
   rm(mstan)
   
@@ -545,16 +606,19 @@ DFint <- sapply(vars,function(x){
   
   bind_rows(.id="height.m")
 
-saveRDS(DF,file="outputs_paper/ValidationCG/PosteriorsHeightModels.rds")
+if(PS.correct==FALSE){saveRDS(DF,file="outputs_paper/ValidationCG/HeightModels/PosteriorsHeightModels.rds")} else {
+ saveRDS(DF,file="outputs_paper/ValidationCG/HeightModels/PosteriorsHeightModels_WithPScorrection.rds") 
+}
 ```
 
 
-```{r LookTablePosteriorsHeightModels, eval=F}
-DF <- readRDS(file="outputs_paper/ValidationCG/PosteriorsHeightModels.rds")
+```{r LookTablePosteriorsHeightModels, eval=T}
+if(PS.correct==FALSE){DF <- readRDS(file="outputs_paper/ValidationCG/HeightModels/PosteriorsHeightModels.rds")} else{
+ DF <- readRDS(file="outputs_paper/ValidationCG/HeightModels/PosteriorsHeightModels_WithPScorrection.rds")
+}
 
 DF %>% 
-  filter(term=="betaX1"|term=="betaX2") %>% 
-  print(n=Inf) %>%
+  filter(term=="betaX1"|term=="betaX2") %>%
   knitr::kable(digits = 3) %>% 
   kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F)
 
@@ -574,9 +638,22 @@ DF %>%
 index.match <- list(R_squared=c("R2","Goodness of fit ($R^{2}$ estimate)"),
                     betaX1=c("betaX1","Regression coefficients"))
 
+labels <- c("Common SNP candidates",
+            "Merged SNP candidates",
+            "Reference SNPs",
+            "Annual mean temperature",
+            "Maximum temperature of the warmest month",
+            "Minimum temperature of the coldest month",
+            "Annual precipitation",
+            "Precipitation seasonality")
+
 lapply(c("betaX1","R_squared"),function(index){
 
-pdf <- readRDS(file="outputs_paper/ValidationCG/PosteriorsHeightModels.rds") %>% 
+if(PS.correct==FALSE){DF <- readRDS(file="outputs_paper/ValidationCG/HeightModels/PosteriorsHeightModels.rds")} else{
+ DF <- readRDS(file="outputs_paper/ValidationCG/HeightModels/PosteriorsHeightModels_WithPScorrection.rds")
+}
+  
+pdf <- DF %>% 
   filter(term==index) %>% 
   mutate(Method=case_when(str_detect(variable,"CTD")==TRUE~"Climatic transfer distance",
                           str_detect(variable,"GDM")==TRUE~"Genomic offset",
@@ -638,11 +715,22 @@ p <- pdf %>%
     guides(color=guide_legend(ncol=2))
 
 
-ggsave(p,
+if(PS.correct==FALSE){
+  
+  ggsave(p,
        file=paste0("outputs_paper/ValidationCG/HeightModels/Figs/",index.match[[index]][[1]],".pdf"),
        device="pdf",
        width=9,
        height=15)
+  
+} else{
+ ggsave(p,
+       file=paste0("outputs_paper/ValidationCG/HeightModels/Figs/",index.match[[index]][[1]],"_WithPScorrection.pdf"),
+       device="pdf",
+       width=9,
+       height=15)
+}
+
 
 })
 
@@ -652,34 +740,32 @@ ggsave(p,
 
 
 ```{r LooHeightModels}
-sites <- c("MAD_htdec11","CAC_htdec11","BDX_htnov13","BDX_htnov18","POR_htjan12","POR_htmay13","AST_htdec11","AST_htmar14")
-
-sapply(sites,function(sel.site){
+# Only performed on models with BLUPs not corrected for population genetic structure.
+sapply(height.m,function(sel.height.m){
   
 d <- list.files(paste0("outputs_paper/ValidationCG/HeightModels/LOOs"),full.names=TRUE) %>% 
-  str_subset(sel.site) %>% 
+  str_subset(sel.height.m) %>% 
   sapply(readRDS, USE.NAMES = TRUE,simplify=FALSE) %>% 
   loo_compare() %>% 
   as.data.frame() %>% 
   rownames_to_column(var ="variable") %>% 
   as_tibble() %>% 
-  mutate(site=sel.site,
-         variable=str_sub(variable,49,-17),
+  mutate(variable=str_sub(variable,49,-17),
          ModellingApproach=case_when(str_detect(variable,"GF")~"GF-based genomic offset",
                                      str_detect(variable,"GDM")~"GDM-based genomic offset",
                                      str_detect(variable,"CTD")~"Climatic transfer distance"),
-         Covariate=case_when(str_detect(variable,"Mer")~"Merged candidates",
-                             str_detect(variable,"Com")~"Common candidates",
-                             str_detect(variable,"Ref")~"Reference candidates",
-                             str_detect(variable,"bio5")~"bio5 - Max T° of the warmest month (°C)",
-                             str_detect(variable,"bio6")~"bio6 - Min T° of the coldest month (°C)",
-                             str_detect(variable,"bio12")~"bio12 - Annual precipitation (mm)",
-                             str_detect(variable,"bio15")~"bio15 - Precipitation seasonality (coeff of variation)",
-                             str_detect(variable,"bio1")~"bio1 - Annual daily mean T° (°C)")) %>% 
+         Covariate=case_when(str_detect(variable,"Mer")~"Merged SNP candidates",
+                             str_detect(variable,"Com")~"Common SNP candidates",
+                             str_detect(variable,"Ref")~"Reference SNPs",
+                             str_detect(variable,"bio5")~"Maximum temperature of the warmest month (°C; bio5 in WorldClim)",
+                             str_detect(variable,"bio6")~"Minimum temperature of the coldest month (°C; bio6 in WorldClim)",
+                             str_detect(variable,"bio12")~"Annual precipitation (mm; bio12 in WorldClim)",
+                             str_detect(variable,"bio15")~"Precipitation seasonality (coeff of variation; bio15 in WorldClim)",
+                             str_detect(variable,"bio1")~"Annual daily mean temperature (°C; bio1 in WorldClim)")) %>% 
     dplyr::select(ModellingApproach,Covariate,elpd_diff,se_diff)
 
 print(xtable(d,type = "latex",digits=2), 
-      file = paste0("tables_paper/ValidationCG_HeightModelsLOOs_",sel.site,".tex"), 
+      file = paste0("tables_paper/ValidationCG_HeightModelsLOOs_",sel.height.m,".tex"), 
       include.rownames=FALSE)
 
 d
@@ -687,6 +773,42 @@ d
 }, USE.NAMES = TRUE,simplify=FALSE)
 ```
 
+
+## Experimental design
+
+We generate a latex table for the Supplementary Information.
+
+```{r ExpDesignHeightModels}
+ExpDesignTab <- sapply(height.m,function(x){
+data %>%
+  dplyr::select(prov,all_of(x)) %>% 
+  dplyr::rename(height=all_of(x)) %>% 
+  drop_na() %>% 
+  group_by(prov) %>% 
+  dplyr::summarise(count =n(),
+                   mean.height=mean(height), .groups = 'drop')
+
+  
+  
+}, USE.NAMES = TRUE,simplify=FALSE ) %>% 
+  bind_rows(.id="variable") %>% 
+  pivot_wider(names_from=variable,values_from = c(count,mean.height),names_sep="_") %>% 
+  dplyr::select(prov,contains("AST_htdec"),contains("AST_htmar"),
+                contains("BDX_htnov13"),contains("BDX_htnov18"),
+                contains("CAC"),
+                contains("MAD"),
+                contains("POR_htjan"),contains("POR_htmay"))
+
+ExpDesignTab  %>%
+  knitr::kable(digits = 3) %>% 
+  kable_styling(font_size=10,bootstrap_options = c("striped","hover", "condensed"), full_width = F) %>% 
+  column_spec(1, bold = T)
+
+# Generate the latex table
+print(xtable(ExpDesignTab, type = "latex",digits=2), 
+      file = paste0("tables_paper/ExperimentalDesignTablesHeightCommonGarden.tex"), 
+      include.rownames=FALSE)
+```
 
 # References
 
