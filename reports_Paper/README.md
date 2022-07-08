@@ -242,6 +242,15 @@ Meaning of the columns:
 
 ## Scripts in Zenodo
 
-The code included in the present *zenodo* repository was run on *R version 3.6.3* and *RStudio version 1.1.463* and constitutes the code necessary to replicate the analyses of the present study.
+The code included in the present *Zenodo* repository was run on *R version 3.6.3* and *RStudio version 1.1.463* and constitutes the code necessary to replicate the analyses of the present study.
 
 Here is what the different scripts are for:
+
+* `1_FormattingGenomicData.Rmd`: formatting, exploring and filtering genomic data and imputing missing SNP data.
+* `2_VizAndCreatingEnvRasters.Rmd`: calculating the correlations and creating raster stacks of the eight selected environemntal variables used in the gene-environment association analyses.
+* `3_GEAanalyses_BayPass.Rmd`: performing univariate gene-environment association analyses with BayPass and identifying candidate SNPs potentially involved in local adaptation.
+* `4_GEAanalyses_RDA.Rmd`: performing multivariate gene-environment association analyses with RDA and identifying candidate SNPs potentially involved in local adaptation.
+* `5_CreatingFormattingCalculatingLDSubsetsCandidateSNPs.Rmd`: Building the three sets of SNPs, formatting for GDM and GF analyses and calculating LD for the three sets of SNPs.
+* `6_CalculatingGenomicOffset.Rmd`: calculating the GO for the three sets of SNPs with GDM and GF methods.
+* `7_ValidationCommonGardens.Rmd`: validating the genomic offset predictions using height and mortality data from five common gardens.
+* `8_ValidationNFI.Rmd`: validating the genomic offset predictions using mortality data from the Spanish and French National Forest Inventories.
