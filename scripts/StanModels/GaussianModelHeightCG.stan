@@ -32,8 +32,9 @@ model {
 generated quantities{
   // log likelihood for loo
   vector[N] log_lik;
+  vector[N] muhat;
   for (n in 1:N) {
     log_lik[n] = normal_lpdf(H[n] |mu[n],sigma_r);
+    muhat[n] = normal_rng(mu[n], sigma_r);
   }
 }
-
