@@ -239,6 +239,20 @@ Meaning of the columns:
 
 **Dataset `NFIdata.csv`**
 
+NFI data is publicly available and can be found [here](https://www.miteco.gob.es/en/biodiversidad/servicios/banco-datos-naturaleza/informacion-disponible/ifn3_bbdd_descargas.htm.aspx) and [here](https://www.miteco.gob.es/en/biodiversidad/servicios/banco-datos-naturaleza/informacion-disponible/ifn2_descargas.aspx) for the Spanish National Forest Inventory, and [here](https://inventaire-forestier.ign.fr/dataIFN/) for the French National Forest Inventory. Mortality data used in the present paper was extracted at the plot-level in [Changenet et al. (2021)](https://onlinelibrary.wiley.com/doi/full/10.1111/geb.13301?casa_token=_DRDCWBu_pMAAAAA%3Ac-m4XAwIzRBX6RqxZ5czMkzTZA9Df7RWvm5SdiuitaFgVeo04WLVtfLBRTifFuOMZvPJ5Qp8QbwHbRJvHg).
+
+Meaning of the columns:
+
+* `plotcode`: plot code: 
+* `longitude` and `latitude`: longitude and latitude of the NFI plot.
+* `country`: country in which the plot is (ES = Spain, FR = France).
+* `NbYears`: number of years between surveys in the Spanish inventory (which is equal to 5 in the French inventory as mortality is estimated in the five years before the survey date).
+* `NbDead`: number of dead trees in the plot.
+* `NbTot`: total number of trees in the plot.
+* `BasalArea`: basal area of all tree species in the plot (proxy of the competition among trees).
+
+
+
 
 ## Scripts in Zenodo
 
@@ -247,7 +261,7 @@ The code included in the present *Zenodo* repository was run on *R version 3.6.3
 Here is what the different scripts are for:
 
 * `1_FormattingGenomicData.Rmd`: formatting, exploring and filtering genomic data and imputing missing SNP data.
-* `2_VizAndCreatingEnvRasters.Rmd`: calculating the correlations and creating raster stacks of the eight selected environemntal variables used in the gene-environment association analyses.
+* `2_VizAndCreatingEnvRasters.Rmd`: calculating the correlations, creating raster stacks of the eight selected environemntal variables used in the gene-environment association analyses and generating maps of the four climatic variables for the supplementary information.
 * `3_GEAanalyses_BayPass.Rmd`: performing univariate gene-environment association analyses with BayPass and identifying candidate SNPs potentially involved in local adaptation.
 * `4_GEAanalyses_RDA.Rmd`: performing multivariate gene-environment association analyses with RDA and identifying candidate SNPs potentially involved in local adaptation.
 * `5_CreatingFormattingCalculatingLDSubsetsCandidateSNPs.Rmd`: Building the three sets of SNPs, formatting for GDM and GF analyses and calculating LD for the three sets of SNPs.
