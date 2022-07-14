@@ -548,6 +548,137 @@ writeRaster(stacks[[2]][[1]],
               overwrite=TRUE)
 ```
 
+`r knitr::opts_chunk$set(eval = T)`
+
+
+# Climate maps
+
+
+For the maps, we need the hillshade for the background.
+
+```{r LoadMapping}
+background <- raster("data/maps/Hillshade/background.grd")
+
+# Gray scale of the background:
+grayscale_colors <- gray.colors(100,            # number of different color levels
+                                start = 0.0,    # how black (0) to go
+                                end = 1.0,      # how white (1) to go
+                                gamma = 2.2,    # correction between how a digital
+                                # camera sees the world and how human eyes see it
+                                alpha = 0.6)
+```
+
+
+
+We load the environmental data:
+
+  - a raster of environmental variables with **current** climate and with **resolution ~ 30.869 km2** (2.5 minutes) (5.556 x 5.556 at the equator), named: `stackCurrClim`.
+  
+  - a raster of environmental variables with **future** climate under scenario **SSP3-7.0** and with **resolution ~ 30.869 km2** (2.5 minutes), named: `stackFutClimSSP370`.
+    
+  - a raster of environmental variables with **future** climate under scenario **SSP5-8.5** and with **resolution ~ 30.869 km2** (2.5 minutes), named: `stackFutClimSSP585`.
+  
+
+```{r LoadEnvData}
+stackCurrClim <- stack("data/StacksEnvVars/Stack_CurrentClimate_Res25minutes.grd")
+stackFutClimSSP370 <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP370/StackGCMsAvg.grd")
+stackFutClimSSP585 <- stack("data/StacksEnvVars/FutureClimate/2041to2060/SSP585/StackGCMsAvg.grd")
+```
+
+
+
+```{r}
+vars <- c("bio5","bio6","bio12","bio15")
+
+lapply(vars, function(x){
+minv <- min(c(min(values(stackCurrClim[[x]]),na.rm=T),
+              min(values(stackFutClimSSP370[[x]]),na.rm=T),
+              min(values(stackFutClimSSP585[[x]]),na.rm=T)))
+maxv <- max(c(max(values(stackCurrClim[[x]]),na.rm=T),
+              max(values(stackFutClimSSP370[[x]]),na.rm=T),
+              max(values(stackFutClimSSP585[[x]]),na.rm=T)))
+
+if(x %in% c("bio5","bio6")){
+  col=colorRampPalette(c("green","blue","yellow","red","black"))
+} else {
+  col=colorRampPalette(c("black","red","yellow","blue","green"))
+}
+
+pdf(paste0("figs/Paper/ClimateMaps/",x,".pdf"),height=12,width=12)
+layout(matrix(1:6,3,2))
+
+# current
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Current climate")
+plot(stackCurrClim[[x]],zlim=c(minv,maxv) ,add=T,col=col(255))
+
+# future SSP370
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future climate - SSP3-7.0")
+plot(stackFutClimSSP370[[x]],add=T,zlim=c(minv,maxv) ,col=col(255))
+
+# future SS
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="Future climate - SSP5-8.5")
+plot(stackFutClimSSP585[[x]],add=T,zlim=c(minv,maxv) ,col=col(255))
+
+# absolute difference btw current and SSP370
+diff <- overlay(stackFutClimSSP370[[x]],
+                stackCurrClim[[x]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="SSP3-7.0 - Current")
+plot(diff,add=T,col=col(255))
+
+
+# absolute difference btw current and SSP585
+diff <- overlay(stackFutClimSSP585[[x]],
+                stackCurrClim[[x]],
+                fun=function(r1, r2){return(r1-r2)})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F,main="SSP5-8.5 - Current")
+plot(diff,add=T,col=col(255))
+
+
+# Percentage of change btw current and SSP585
+diff <- overlay(stackFutClimSSP585[[x]],
+                stackCurrClim[[x]],
+                fun=function(r1, r2){r1*100/r2-100})
+
+plot(background,col=grayscale_colors, axes=FALSE,legend=F ,
+     main="Percentage change btw SSP5-8.5 and current")
+plot(diff,
+     add=T,
+     col=col(255))
+dev.off()
+
+
+# Map only current climatic conditions
+pdf(paste0("figs/Paper/ClimateMaps/",x,"_Current.pdf"), 
+    width=18, height=18.5)
+plot(background,
+     col=grayscale_colors,
+     axes=FALSE,legend=F)
+plot(stackCurrClim[[x]],zlim=c(minv,maxv) ,add=T,col=col(255))
+dev.off()
+
+# Map only future climatic conditions
+# SSP370
+pdf(paste0("figs/Paper/ClimateMaps/",x,"_SSP370.pdf"), 
+    width=18, height=18.5)
+plot(background,
+     col=grayscale_colors,
+     axes=FALSE,legend=F)
+plot(stackFutClimSSP370[[x]],zlim=c(minv,maxv) ,add=T,col=col(255))
+dev.off()
+
+# SSP585
+pdf(paste0("figs/Paper/ClimateMaps/",x,"_SSP585.pdf"), 
+    width=18, height=18.5)
+plot(background,
+     col=grayscale_colors,
+     axes=FALSE,legend=F)
+plot(stackFutClimSSP585[[x]],zlim=c(minv,maxv) ,add=T,col=col(255))
+dev.off()
+})
+```
+
 # References
 
-`r knitr::opts_chunk$set(eval = F)`
