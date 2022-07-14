@@ -180,42 +180,50 @@ saveRDS(DF.go, file="outputs_paper/ValidationNFI/OutputsModels.rds")
 
 # Visualization
 
-```{r VisualizeCoeffGenomicOffset,fig.height=8,fig.width=10}
+
+```{r PaperFigure, fig.height=8,fig.width=10}
 DF.go <- readRDS(file="outputs_paper/ValidationNFI/OutputsModels.rds")
+
+model.labeller <- c("Generalised Dissimilarity Modeling", "Gradient Forests")
+names(model.labeller) <- c("GDM", "GF")
 
 graphs <- lapply(c("betaGO_country[1]","betaGO_country[2]"), function(x){
 
-p <-  DF.go %>% 
+  p <-  DF.go %>% 
   filter(term==x) %>% 
   mutate(Model=str_sub(GenomicOffset,18,-1),
-         Model=case_when(Model == "GDM" ~ "Generalised Dissimilarity Modeling",
-                         Model == "GF"  ~ "Gradient Forests"),
          SNPSets=str_sub(GenomicOffset,14,16),
          SNPSets=factor(SNPSets,levels=c("Com","Mer","Ref")),
-         Scenario=str_sub(GenomicOffset,7,12),
-         Scenario=case_when(Scenario=="SSP370" ~ "SSP3-7.0 (moderately alarming)",
-                             Scenario=="SSP585" ~ "SSP5-8.5 (strongly alarming)"))  %>%
+         Scenario=str_sub(GenomicOffset,7,12))  %>%
   
-  ggplot(aes(x = SNPSets, y = estimate,ymin = conf.low, ymax = conf.high,colour=Scenario,shape=Scenario)) +
-  geom_pointinterval(position = position_dodge(width = .6),point_size=2.5,size=2,show.legend = c(size = TRUE)) +
+  ggplot(aes(x = Scenario, y = estimate,ymin = conf.low, ymax = conf.high,colour=SNPSets,shape=SNPSets)) +
+  geom_pointinterval(position = position_dodge(width = .6),point_size=2.5,size=3,show.legend = c(size = TRUE)) +
   geom_hline(yintercept = 0,color="gray") +
-  facet_grid(.~Model,scales="free", space = "free") + 
+  facet_grid(.~Model,scales="free", space = "free",labeller = labeller(Model = model.labeller)) + 
   ylab(TeX("$\\beta_{GO}$ estimates")) + xlab("") +
-  scale_colour_manual(values=c("darkviolet","orange1")) +
+  scale_colour_manual(values=c("forestgreen","chartreuse2","gold1"),labels=c("Common SNP candidates",
+            "Merged SNP candidates",
+            "Reference SNPs"),name="SNP sets") +
+  scale_shape_manual(values=c(16,17,8),labels=c("Common SNP candidates",
+            "Merged SNP candidates",
+            "Reference SNPs"),name="SNP sets") +
+  scale_x_discrete(labels=c("SSP370" = "SSP3-7.0", "SSP585" = "SSP5-8.5")) +
   theme_bw() +
   theme(axis.text.x = element_text(size=13),
         axis.text.y = element_text(size=16),
         axis.title = element_text(size=16),
       legend.title=element_text(size=13), 
       legend.text=element_text(size=10),
-      legend.position = c(.85, .83),
+      legend.position = c(.85, .7),
       legend.background = element_rect(colour = "grey"),
       strip.text.x = element_text(size = 14),
       panel.grid.minor.x=element_blank(),
       panel.grid.major.x=element_blank()) +
     guides(color=guide_legend(ncol=1))
   
-})
+p
+  
+  })
 
 
 graphs[[2]] <- graphs[[2]] + theme(legend.position = "none")
