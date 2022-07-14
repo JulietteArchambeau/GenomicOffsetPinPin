@@ -110,7 +110,7 @@ Variables in the dataset
 
   - Plot code: `plotcode`
   - Longitude and latitude of the plot: `longitude` and `latitude`.
-  - Country in which is the plot: `country` (ES = Spain, FR = France).
+  - Country in which the plot is: `country` (ES = Spain, FR = France).
   - The number of years between surveys in the Spanish inventory (which is equal to 5 in the French inventory as mortality is estimated in the five years before the survey date): `NbYears`.
   - The number of dead trees in the plot: `NbDead`.
   - The total number of trees in the plot: `NbTot`.
