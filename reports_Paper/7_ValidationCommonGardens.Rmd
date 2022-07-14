@@ -327,14 +327,14 @@ d <- list.files(paste0("outputs_paper/ValidationCG/MortalityModels/LOOs"),full.n
          ModellingApproach=case_when(str_detect(variable,"GF")~"GF-based genomic offset",
                                      str_detect(variable,"GDM")~"GDM-based genomic offset",
                                      str_detect(variable,"CTD")~"Climatic transfer distance"),
-         Covariate=case_when(str_detect(variable,"Mer")~"Merged candidates",
-                             str_detect(variable,"Com")~"Common candidates",
+         Covariate=case_when(str_detect(variable,"Mer")~"Merged SNP candidates",
+                             str_detect(variable,"Com")~"Common SNP candidates",
                              str_detect(variable,"Ref")~"Reference candidates",
-                             str_detect(variable,"bio5")~"bio5 - Maximum temperature of the warmest month (°C)",
-                             str_detect(variable,"bio6")~"bio6 - Minimum temperature of the coldest month (°C)",
-                             str_detect(variable,"bio12")~"bio12 - Annual precipitation (mm)",
-                             str_detect(variable,"bio15")~"bio15 - Precipitation seasonality (coefficient of variation)",
-                             str_detect(variable,"bio1")~"bio1 - Annual mean temperature (°C)")) %>% 
+                             str_detect(variable,"bio5")~"Maximum temperature of the warmest month (°C; bio5 in WorldClim)",
+                             str_detect(variable,"bio6")~"Minimum temperature of the coldest month (°C; bio6 in WorldClim)",
+                             str_detect(variable,"bio12")~"Annual precipitation (mm; bio12 in WorldClim)",
+                             str_detect(variable,"bio15")~"Precipitation seasonality (coeff of variation; bio15 in WorldClim)",
+                             str_detect(variable,"bio1")~"Annual daily mean temperature (°C; bio1 in WorldClim)")) %>% 
     dplyr::select(ModellingApproach,Covariate,elpd_diff,se_diff)
 
 print(xtable(d,type = "latex",digits=2), 
