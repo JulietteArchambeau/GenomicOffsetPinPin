@@ -145,7 +145,7 @@ Column meaning:
 mergedcand <- candBaypass %>% 
   filter(COVARIABLE %in% c("bio5","bio6","bio12","bio15","water_top","depth_roots","TRI","BurnedArea")) %>% 
   full_join(candRDA,by="snp")  %>% 
-  dplyr::select(snp,COVARIABLE,medianBF,medianBeta,contains("bio"),water_top,depth_roots,BurnedArea,TRI) %>% 
+  dplyr::select(snp,COVARIABLE,medianBF,medianBeta,contains("bio"),water_top,depth_roots,BurnedArea,TRI,predictor,correlation) %>% 
   dplyr::rename(varBaypass=COVARIABLE,
          BF.Baypass=medianBF,
          beta.Baypass=medianBeta,
@@ -156,7 +156,9 @@ mergedcand <- candBaypass %>%
          beta.water_top.RDA=water_top,
          beta.depth_roots.RDA=depth_roots,
          beta.BurnedArea.RDA=BurnedArea,
-         beta.TRI.RDA=TRI) 
+         beta.TRI.RDA=TRI,
+         main.predictor.RDA=predictor,
+         main.correlation.RDA=correlation) 
 
 mergedcand %>% 
   kable() %>% 
@@ -173,7 +175,7 @@ There are **`r length(mergedcand$snp)` merged candidates.**
 comcand <- candBaypass %>% 
   filter(COVARIABLE %in% c("bio5","bio6","bio12","bio15","water_top","depth_roots","TRI","BurnedArea")) %>% 
   inner_join(candRDA,by="snp") %>% 
-  dplyr::select(snp,COVARIABLE,medianBF,medianBeta,contains("bio"),water_top,depth_roots,BurnedArea,TRI) %>% 
+  dplyr::select(snp,COVARIABLE,medianBF,medianBeta,contains("bio"),water_top,depth_roots,BurnedArea,TRI,predictor,correlation) %>% 
   dplyr::rename(varBaypass=COVARIABLE,
          BF.Baypass=medianBF,
          beta.Baypass=medianBeta,
@@ -184,7 +186,9 @@ comcand <- candBaypass %>%
          beta.water_top.RDA=water_top,
          beta.depth_roots.RDA=depth_roots,
          beta.BurnedArea.RDA=BurnedArea,
-         beta.TRI.RDA=TRI) 
+         beta.TRI.RDA=TRI,
+         main.predictor.RDA=predictor,
+         main.correlation.RDA=correlation) 
 
 comcand %>% 
   kable() %>% 
@@ -201,7 +205,6 @@ snp.sets <- list(rownames(geno), # Reference SNPs
                  comcand$snp)    # Common candidates
 
 names(snp.sets) <- c("Ref","Mer","Com")
-# saveRDS(snp.sets,file=paste0("data_DRYAD/ListNamesCandSNPs.rds")) # maybe no need to save the list in the repository
 ```
 
 # Formatting genomic data for GF
