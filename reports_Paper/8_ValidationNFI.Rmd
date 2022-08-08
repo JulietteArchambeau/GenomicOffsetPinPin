@@ -187,7 +187,7 @@ DF.go <- readRDS(file="outputs_paper/ValidationNFI/OutputsModels.rds")
 model.labeller <- c("Generalised Dissimilarity Modeling", "Gradient Forests")
 names(model.labeller) <- c("GDM", "GF")
 
-graphs <- lapply(c("betaGO_country[1]","betaGO_country[2]"), function(x){
+graphs <- lapply(c("betaGO_country[2]","betaGO_country[1]"), function(x){
 
   p <-  DF.go %>% 
   filter(term==x) %>% 
@@ -201,25 +201,25 @@ graphs <- lapply(c("betaGO_country[1]","betaGO_country[2]"), function(x){
   geom_hline(yintercept = 0,color="gray") +
   facet_grid(.~Model,scales="free", space = "free",labeller = labeller(Model = model.labeller)) + 
   ylab(TeX("$\\beta_{GO}$ estimates")) + xlab("") +
-  scale_colour_manual(values=c("forestgreen","chartreuse2","gold1"),labels=c("Common SNP candidates",
-            "Merged SNP candidates",
+  scale_colour_manual(values=c("forestgreen","chartreuse2","gold1"),labels=c("Common candidate SNPs",
+            "Merged candidate SNPs",
             "Reference SNPs"),name="SNP sets") +
-  scale_shape_manual(values=c(16,17,8),labels=c("Common SNP candidates",
-            "Merged SNP candidates",
+  scale_shape_manual(values=c(16,17,8),labels=c("Common candidate SNPs",
+            "Merged candidate SNPs",
             "Reference SNPs"),name="SNP sets") +
   scale_x_discrete(labels=c("SSP370" = "SSP3-7.0", "SSP585" = "SSP5-8.5")) +
   theme_bw() +
   theme(axis.text.x = element_text(size=13),
         axis.text.y = element_text(size=16),
         axis.title = element_text(size=16),
-      legend.title=element_text(size=13), 
-      legend.text=element_text(size=10),
-      legend.position = c(.85, .7),
+      legend.title=element_text(size=10), 
+      legend.text=element_text(size=9),
+      legend.position = c(.71, .87),
       legend.background = element_rect(colour = "grey"),
       strip.text.x = element_text(size = 14),
       panel.grid.minor.x=element_blank(),
       panel.grid.major.x=element_blank()) +
-    guides(color=guide_legend(ncol=1))
+    guides(color=guide_legend(ncol=3))
   
 p
   
