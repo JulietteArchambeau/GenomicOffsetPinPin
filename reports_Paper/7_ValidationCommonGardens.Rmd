@@ -60,6 +60,7 @@ library(bayesplot)
 color_scheme_set("green")
 library(reshape2)
 library(dplyr)
+library(cowplot)
 library(tidyverse)
 library(xtable)
 library(latex2exp)
@@ -228,16 +229,16 @@ DF %>%
   kable_styling(bootstrap_options = c("striped","hover", "condensed"), full_width = F)
 ```
 
-## Visualization
+## Visualization - SI 
 
-```{r SummaryFigsMortalityModels}
-index.match <- list(betaH=c("betaH","Height effect ($\\beta_{H}$ estimate)"),
-                    betaX1=c("betaX1","Regression coefficients"))
+```{r FigsMortalityModelsSI}
+index.match <- list(betaH=c("betaH","$\\beta_{H}$ estimates (effect of initial tree height)"),
+                    betaX1=c("betaX1","$\\beta_{X1}$ estimates"))
 
 lapply(c("betaX1","betaH"),function(index){
 
-labels <- c("Common SNP candidates",
-            "Merged SNP candidates",
+labels <- c("Common candidate SNPs",
+            "Merged candidate SNPs",
             "Reference SNPs",
             "Annual mean temperature",
             "Maximum temperature of the warmest month",
@@ -257,8 +258,8 @@ p <- readRDS(file=paste0("outputs_paper/ValidationCG/MortalityModels/TableCoeffM
                             str_detect(variable,"GO")==TRUE~str_sub(variable,4,6)),
          Method.GO=factor(Method.GO,levels=c("GDM","GF","CTD")),
          Variable=factor(Variable,levels=c("Com","Mer","Ref",paste0("bio",c(1,5,6,12,15)))),
-         site=case_when(site=="caceres"~"Cáceres",
-                        site=="madrid"~"Madrid")) %>% 
+         site=case_when(site=="caceres"~"Cáceres (8 months)",
+                        site=="madrid"~"Madrid (13 months)")) %>% 
   
   ggplot(aes(x = Variable, y = estimate,ymin = conf.low, ymax = conf.high,color=Variable,shape=Variable)) +#
   geom_hline(yintercept = 0,color="gray") +
@@ -308,6 +309,48 @@ Important points:
   
   - Surprisingly, the best CTD is the minimum temperature of the coldest month, so we may expect that common candidate SNPs which were almost all associated with this climatic variable would also capture the mortality variation, but this is not the case.
   
+## Visualization - Manuscript
+  
+```{r FigsMortalityModelsManuscript}
+labels <- c("Common candidate SNPs",
+            "Merged candidate SNPs",
+            "Reference SNPs")
+
+p <- readRDS(file=paste0("outputs_paper/ValidationCG/MortalityModels/TableCoeffMortalityModels.rds")) %>% 
+  filter(term=="betaX1") %>% 
+  filter(!str_detect(variable,"CTD")) %>% 
+  mutate(Method.GO=case_when(str_detect(variable,"GDM")==TRUE~"GDM",
+                          str_detect(variable,"GF")==TRUE~"GF"),
+         SNPset=case_when(str_detect(variable,"GO")==TRUE~str_sub(variable,4,6)),
+         Method.GO=factor(Method.GO,levels=c("GDM","GF")),
+         SNPset=factor(SNPset,levels=c("Com","Mer","Ref",paste0("bio",c(1,5,6,12,15)))),
+         site=case_when(site=="caceres"~"Cáceres (8 months)",
+                        site=="madrid"~"Madrid (13 months)")) %>% 
+  
+  ggplot(aes(x = Method.GO, y = estimate,ymin = conf.low, ymax = conf.high,color=SNPset,shape=SNPset)) +#
+  geom_hline(yintercept = 0,color="gray") +
+  geom_pointinterval(position = position_dodge(width = .4),point_size=3.5,size=3) + # 
+  facet_grid(.~site,scales="free_x", space = "free") + 
+  ylab(TeX("$\\beta_{X1}$ estimates in mortality models")) + xlab("") +
+  scale_color_manual(values=c("forestgreen","chartreuse2","gold1"),labels=labels,name="SNP sets") +
+  scale_shape_manual(values = c(16,17,8),labels=labels,name="SNP sets") +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=17),
+        axis.text.y = element_text(size=13),
+        axis.title.y = element_text(size=16),
+        axis.title.x = element_text(size=1),
+      legend.title=element_text(size=16), 
+      legend.text=element_text(size=15),
+      strip.text.x = element_text(size = 16.5),
+      strip.text.y = element_text(size=16,angle = 0),
+      panel.grid.minor.x=element_blank(),
+      panel.grid.major.x=element_blank()) +
+    guides(color=guide_legend(ncol=1),
+           shape = guide_legend(override.aes = list(size =2 )))
+ 
+part2.fig.paper <- p  
+```
+
   
 
 ## Leave-one out cross validation
@@ -447,7 +490,7 @@ plot_predictions <- function(mod,stanlist) {
 
 ```{r BLUPsCorrectionForPopStructure}
 # Correcting the BLUPs with pop structure?
-PS.correct = TRUE
+PS.correct = FALSE
 ```
 
 ```{r HeightMeasurements}
@@ -632,14 +675,14 @@ DF %>%
 
 ```
 
-## Visualization
+## Visualization - SI
 
-```{r SummaryFigsHeightModels,fig.height=12,fig.width=12}
-index.match <- list(R_squared=c("R2","Goodness of fit ($R^{2}$ estimate)"),
-                    betaX1=c("betaX1","Regression coefficients"))
+```{r FigsHeightModelsSI,fig.height=12,fig.width=12}
+index.match <- list(R_squared=c("R2","Goodness of fit ($R^{2}$ estimates)"),
+                    betaX1=c("betaX1","$\\beta_{X1}$ estimates"))
 
-labels <- c("Common SNP candidates",
-            "Merged SNP candidates",
+labels <- c("Common candidate SNPs",
+            "Merged candidate SNPs",
             "Reference SNPs",
             "Annual mean temperature",
             "Maximum temperature of the warmest month",
@@ -674,19 +717,19 @@ pdf <- DF %>%
                        height.m=="CAC_htdec11"~ "(8 months)",
                        height.m=="BDX_htnov13"~ "(25 months)",
                        height.m=="BDX_htnov18"~ "(85 months)",
-                       height.m=="POR_htjan12"~ "(11 months old)",
-                       height.m=="POR_htmay13"~ "(27 months old)",
-                       height.m=="AST_htdec11"~ "(10 months old)",
-                       height.m=="AST_htmar14"~ "(37 months old)"),
+                       height.m=="POR_htjan12"~ "(11 months)",
+                       height.m=="POR_htmay13"~ "(27 months)",
+                       height.m=="AST_htdec11"~ "(10 months)",
+                       height.m=="AST_htmar14"~ "(37 months)"),
          
          Site.Age.labels=case_when(height.m=="MAD_htdec11"~ "Madrid (13 months)",
                                    height.m=="CAC_htdec11"~ "Cáceres (8 months)",
                                    height.m=="BDX_htnov13"~ "Bordeaux (25 months)",
                                    height.m=="BDX_htnov18"~ "Bordeaux (85 months)",
-                                   height.m=="POR_htjan12"~ "Portugal (11 months old)",
-                                   height.m=="POR_htmay13"~ "Portugal (27 months old)",
-                                   height.m=="AST_htdec11"~ "Asturias (10 months old)",
-                                   height.m=="AST_htmar14"~ "Asturias (37 months old)")) 
+                                   height.m=="POR_htjan12"~ "Portugal (11 months)",
+                                   height.m=="POR_htmay13"~ "Portugal (27 months)",
+                                   height.m=="AST_htdec11"~ "Asturias (10 months)",
+                                   height.m=="AST_htmar14"~ "Asturias (37 months)")) 
 
 # All combinations site/age: 
 p <- pdf %>% 
@@ -734,6 +777,69 @@ if(PS.correct==FALSE){
 
 })
 
+```
+
+## Visualization - Manuscript
+
+```{r FigsHeightModelsManuscript,fig.height=10,fig.width=10}
+labels <- c("Common candidate SNPs",
+            "Merged candidate SNPs",
+            "Reference SNPs")
+
+DF <- readRDS(file="outputs_paper/ValidationCG/HeightModels/PosteriorsHeightModels.rds")
+  
+pdf <- DF %>% 
+  filter(term=="betaX1") %>% 
+  filter(!str_detect(variable,"CTD")) %>% 
+  filter(height.m %in% c("POR_htmay13","AST_htmar14","BDX_htnov18")) %>% 
+  mutate(Method.GO=case_when(str_detect(variable,"GDM")==TRUE~"GDM",
+                          str_detect(variable,"GF")==TRUE~"GF"),
+         Method.GO=factor(Method.GO,levels=c("GDM","GF","CTD")),
+         SNPset=case_when(str_detect(variable,"GO")==TRUE~str_sub(variable,4,6)),
+         SNPset=factor(SNPset,levels=c("Com","Mer","Ref",paste0("bio",c(1,5,6,12,15)))),
+         Site.Age.labels=case_when(height.m=="BDX_htnov18"~ "Bordeaux (85 months)",
+                                   height.m=="POR_htmay13"~ "Portugal (27 months)",
+                                   height.m=="AST_htmar14"~ "Asturias (37 months)")) 
+
+# All combinations site/age: 
+p <- pdf %>% 
+  ggplot(aes(x = Method.GO, y = estimate,ymin = conf.low, ymax = conf.high,colour=SNPset,shape=SNPset)) +#
+  geom_hline(yintercept = 0,color="gray") +
+  geom_pointinterval(position = position_dodge(width = .4),point_size=3.5,size=3,show.legend = c(size = TRUE)) +
+  facet_grid(.~Site.Age.labels,scales="free_x", space = "free") + 
+  ylab(TeX("$\\beta_{X1}$ estimates in height models")) + xlab("") +
+  scale_color_manual(values=c("forestgreen","chartreuse2","gold1"),labels=labels) +
+  scale_shape_manual(values = c(16,17,8),labels=labels) +
+  theme_bw() +
+  #labs(color="",shape="") +
+  theme(axis.text.x = element_text(size=17),
+        axis.text.y = element_text(size=13),
+        axis.title.y = element_text(size=16),
+        axis.title.x = element_text(size=16),
+      legend.title=element_text(size=13), 
+      legend.text=element_text(size=12),
+      legend.position = "none",
+      strip.text.x = element_text(size = 15.5),
+      strip.text.y = element_text(size=14,angle = 0),
+      panel.grid.minor.x=element_blank(),
+      panel.grid.major.x=element_blank()) +
+    guides(color=guide_legend(ncol=2))
+
+grid.graphs <- plot_grid(p,part2.fig.paper,nrow=2,labels=c("A)","B)"))
+
+ggsave(grid.graphs,
+       file=paste0("figs/Paper/ValidationCG/FigManuscriptValidationCG.pdf"),
+       device="pdf",
+       width=10,
+       height=10)
+  
+ggsave(grid.graphs,
+       file=paste0("figs/Paper/ValidationCG/FigManuscriptValidationCG.png"),
+       device="png",
+       width=10,
+       height=10)
+
+grid.graphs
 ```
 
 ## Leave-one-out cross validation
