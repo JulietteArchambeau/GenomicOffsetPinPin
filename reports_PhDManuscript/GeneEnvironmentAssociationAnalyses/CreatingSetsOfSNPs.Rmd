@@ -215,9 +215,11 @@ names(snp.sets) <- c("Ref","Mer","Mid","Com")
 
 ## DF with candidate SNP codes
 
+
+### For Katha (2nd of June 2022)
+
 Below we create a dataframe with all the candidate SNPs and their associated SNP codes (original ID, ID in the  Axiom assay and ID in the Illumina Infinium assay).
 
-<!-- DF sent to Katha the 2sn of June 2022. -->
 
 ```{r DFCandSNPwithSNPcodes}
 snp.codes <- readRDS("data/GenomicData/FormattedData/SNPcodes.rds") %>% 
@@ -254,5 +256,37 @@ Column meaning:
   - `affx_ID`:  ID from the Axiom assay.
 
   - `infinium_ID`: ID from the Illumina Infinium assay.
+  
+  
+  
+
+### For B4EST deliverable - August 2022
+
+```{r DFCandSNPwithSNPcodes}
+snp.codes <- readRDS("data/GenomicData/FormattedData/SNPcodes.rds") %>% 
+  dplyr::rename(snp_ID_Juliette=snp_ID)
+
+candBaypass <- readRDS(file=paste0("outputs/CandidateSNPs/baypass/CandSNPsBayPass",modelBayPass,".rds")) %>% 
+  mutate(BayPass="BayPass") %>% 
+  dplyr::rename(PredictorBayPass=COVARIABLE) %>% 
+  dplyr::select(snp,BayPass,PredictorBayPass)
+
+candRDA <- readRDS(file="outputs/CandidateSNPs/rda/352CandSNPsRDA.rds") %>% 
+  mutate(RDA="RDA") %>% 
+  dplyr::select(snp,RDA)
+
+full_join(candBaypass,candRDA,by="snp") %>% 
+  mutate(GEA=case_when(BayPass=="BayPass"&RDA=="RDA" ~"BayPass & RDA",
+                       is.na(BayPass) ~ "RDA",
+                       is.na(RDA) ~ "BayPass"),
+         SNPset=case_when(GEA=="BayPass & RDA" ~ "Common and merged",
+                          GEA=="BayPass"|GEA=="RDA" ~ "Merged")) %>% 
+  dplyr::select(snp,GEA,SNPset,PredictorBayPass) %>% 
+  dplyr::rename(snp_ID_Juliette=snp) %>% 
+  left_join(snp.codes,by="snp_ID_Juliette") %>% 
+  dplyr::select(infinium_ID, affx_ID, original_ID, GEA, SNPset) %>% 
+  write.csv(file= paste0("outputs/TableCandidateSNPs_B4ESTdeliverable_August2022.csv"), row.names = F)
+```
+
 
 `r knitr::opts_chunk$set(eval = F)`
