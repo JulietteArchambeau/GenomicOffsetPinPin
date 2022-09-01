@@ -801,7 +801,7 @@ pdf <- DF %>%
                                    height.m=="POR_htmay13"~ "Portugal (27 months)",
                                    height.m=="AST_htmar14"~ "Asturias (37 months)")) 
 
-# All combinations site/age: 
+
 p <- pdf %>% 
   ggplot(aes(x = Method.GO, y = estimate,ymin = conf.low, ymax = conf.high,colour=SNPset,shape=SNPset)) +#
   geom_hline(yintercept = 0,color="gray") +
