@@ -54,6 +54,7 @@ library(tidyverse)
 library(hierfstat)
 library(genetics)
 library(kableExtra)
+library(LDheatmap)
 ```
 
 
@@ -444,4 +445,16 @@ tab  %>%
 print(xtable(tab, type = "latex",digits=2), 
       file = "tables_paper/LDtab.tex", 
       include.rownames=FALSE)
+```
+
+```{r LDheatmaps,eval=F}
+for(i in c("Mer","Com")){ # we don't see anything with reference SNPs
+
+LD <- readRDS(file=paste0("data_DRYAD/LD/outputsLDGenetics_",i,".rds"))
+png(paste0("figs/Paper/LD/LDheatmap_",i,".png"), 1000, 1000)
+rgb.palette <- colorRampPalette(rev(c("aliceblue", "orange", "red")), space = "rgb")
+LDheatmap(LD$`R^2`,add.map=FALSE,color=rgb.palette(18))
+dev.off()
+
+}
 ```
